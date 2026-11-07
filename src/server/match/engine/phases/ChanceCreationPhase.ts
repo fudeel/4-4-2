@@ -42,8 +42,10 @@ export class ChanceCreationPhase implements ActionPhase {
 
     ctx.modifiers.afterPhase('chance', false, ctx);
     const situation = ctx.rng.next();
+    const foulRate = ctx.foulRate();
+    const foulChance = 0.13 * foulRate;
 
-    if (marker && situation < 0.13) {
+    if (marker && situation < foulChance) {
       const inBox = ctx.rng.chance(0.3);
       const booking = ctx.book(marker, { yellowChance: inBox ? 0.5 : 0.35 });
       ctx.defense.stats.fouls += 1;
@@ -56,12 +58,12 @@ export class ChanceCreationPhase implements ActionPhase {
       return inBox ? 'penalty' : 'free_kick';
     }
 
-    if (situation < 0.33) {
+    if (situation < foulChance + 0.2) {
       ctx.emit({ kind: 'clearance', side: ctx.defenseSide, actorId: marker?.id, text: ctx.commentary.line('clearedForCorner', marker), roll });
       return 'corner';
     }
 
-    const tackled = ctx.rng.chance(0.5);
+    const tackled = ctx.rng.chance(Math.min(0.8, 0.5 * foulRate));
     ctx.emit({
       kind: tackled ? 'tackle' : 'clearance',
       side: ctx.defenseSide,
@@ -73,6 +75,12 @@ export class ChanceCreationPhase implements ActionPhase {
     marker?.adjustRating(0.15);
     ctx.outcome = 'defended';
     ctx.momentumShift -= 5;
+
+    // Too many bodies committed forward: the defence wins it and breaks into the space behind.
+    if (ctx.exposedToCounter()) {
+      ctx.counterAttack = true;
+      ctx.emit({ kind: 'counter', side: ctx.defenseSide, actorId: marker?.id, text: ctx.commentary.line('counterExposed', marker) });
+    }
     return null;
   }
 }

@@ -3,6 +3,7 @@ import { otherSide, type CommentaryLine, type MatchView, type Side, type TeamMat
 import { TRAITS } from '../../../shared/model/player';
 import type { GameActions } from '../../state/GameStore';
 import { LineupEditor } from '../components/LineupEditor';
+import { MentalityBar } from '../components/MentalityBar';
 import { h, render, setText } from '../dom';
 import { energyColor, playerById, ratingClass, shortName } from '../format';
 import { commentaryLine } from './CommentaryTicker';
@@ -76,6 +77,7 @@ export function statsTable(view: MatchView): HTMLElement {
 
 export class HalfTimeSheet extends Sheet {
   private readonly editor: LineupEditor;
+  private readonly mentality: MentalityBar;
   private readonly timer = h('span', { class: 'sheet__timer' });
   private readonly summary = h('div');
   private readonly status = h('p', { class: 'lobby__status' });
@@ -86,10 +88,13 @@ export class HalfTimeSheet extends Sheet {
   constructor(actions: GameActions) {
     super('sheet--halftime', false);
     this.editor = new LineupEditor({ onChange: lineup => actions.setLineup(lineup) });
+    this.mentality = new MentalityBar({ onChange: value => actions.setMentality(value) });
     this.readyButton = h('button', { class: 'btn btn--primary btn--block', onClick: () => actions.setReady(!this.ready) }, 'Ready for the 2nd half');
     this.heading.append('Half-time ', this.timer);
     render(this.body,
       this.summary,
+      h('h3', { class: 'sheet__subtitle' }, 'Mentality'),
+      this.mentality.element,
       h('h3', { class: 'sheet__subtitle' }, 'Tactics & substitutions'),
       this.editor.element,
       h('footer', { class: 'sheet__footer' }, this.status, this.readyButton),
@@ -103,6 +108,7 @@ export class HalfTimeSheet extends Sheet {
     this.ready = mine.ready;
     render(this.summary, scoreLine(view), statsTable(view));
     this.editor.update({ team: mine, mode: 'halftime', locked: mine.ready, maxSubstitutions: view.rules.maxSubstitutions });
+    this.mentality.update(mine.mentality);
     setText(this.readyButton, mine.ready ? '✓ Ready — tap to change' : 'Ready for the 2nd half');
     this.readyButton.classList.toggle('btn--done', mine.ready);
     setText(this.status, theirs.ready ? `${theirs.manager?.name ?? 'Opponent'} is ready.` : `${theirs.manager?.name ?? 'Opponent'} is making changes…`);

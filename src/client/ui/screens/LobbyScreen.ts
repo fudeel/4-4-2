@@ -1,6 +1,7 @@
 import { otherSide, type TeamView } from '../../../shared/model/match';
 import type { ClientState } from '../../state/GameStore';
 import { LineupEditor } from '../components/LineupEditor';
+import { MentalityBar } from '../components/MentalityBar';
 import { h, render, setText } from '../dom';
 import type { Screen, ScreenContext } from './Screen';
 
@@ -12,10 +13,12 @@ export class LobbyScreen implements Screen {
   private readonly readyButton: HTMLButtonElement;
   private readonly status = h('p', { class: 'lobby__status' });
   private readonly editor: LineupEditor;
+  private readonly mentality: MentalityBar;
   private ready = false;
 
   constructor(private readonly ctx: ScreenContext) {
     this.editor = new LineupEditor({ onChange: lineup => ctx.actions.setLineup(lineup) });
+    this.mentality = new MentalityBar({ onChange: value => ctx.actions.setMentality(value) });
     this.readyButton = h('button', { class: 'btn btn--primary btn--block btn--ready', onClick: () => ctx.actions.setReady(!this.ready) }, 'Ready');
     this.element = h('main', { class: 'lobby' },
       h('header', { class: 'lobby__header' },
@@ -25,6 +28,11 @@ export class LobbyScreen implements Screen {
       ),
       this.managers,
       h('section', { class: 'panel' }, h('h2', { class: 'panel__title' }, 'Your starting six'), this.editor.element),
+      h('section', { class: 'panel' },
+        h('h2', { class: 'panel__title' }, 'Mentality'),
+        h('p', { class: 'lineup__hint' }, 'Sit deep and tackle hard, or throw players forward. You can move the slider at any moment of the match.'),
+        this.mentality.element,
+      ),
       h('footer', { class: 'lobby__footer' }, this.status, this.readyButton),
     );
   }
@@ -39,6 +47,7 @@ export class LobbyScreen implements Screen {
     setText(this.code, view.roomCode);
     render(this.managers, this.managerCard(view.teams.home, view.you === 'home'), h('span', { class: 'vs' }, 'VS'), this.managerCard(view.teams.away, view.you === 'away'));
     this.editor.update({ team: mine, mode: 'prematch', locked: mine.ready, maxSubstitutions: view.rules.maxSubstitutions });
+    this.mentality.update(mine.mentality);
 
     setText(this.readyButton, mine.ready ? '✓ Ready — tap to change' : 'Ready');
     this.readyButton.classList.toggle('btn--done', mine.ready);

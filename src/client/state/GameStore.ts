@@ -20,6 +20,7 @@ export interface GameActions {
   setLineup(lineup: Lineup): void;
   setReady(ready: boolean): void;
   playCard(cardInstanceId: string | null): void;
+  setMentality(value: number): void;
   requestRematch(): void;
   shareLink(code: string): string;
 }

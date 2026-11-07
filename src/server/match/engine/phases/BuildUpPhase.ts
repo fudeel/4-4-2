@@ -28,8 +28,9 @@ export class BuildUpPhase implements ActionPhase {
       return 'chance';
     }
 
-    // A foul in midfield keeps the move alive: free kick, play on.
-    if (presserFp && ctx.rng.chance(0.12)) {
+    // A foul in midfield keeps the move alive: free kick, play on. Defence-minded teams dive in more.
+    const foulRate = ctx.foulRate();
+    if (presserFp && ctx.rng.chance(0.12 * foulRate)) {
       const booking = ctx.book(presserFp.player, { yellowChance: 0.25 });
       ctx.defense.stats.fouls += 1;
       ctx.emit({
@@ -41,7 +42,7 @@ export class BuildUpPhase implements ActionPhase {
     }
 
     const winner = presserFp?.player ?? null;
-    const tackled = ctx.rng.chance(0.5);
+    const tackled = ctx.rng.chance(Math.min(0.8, 0.5 * foulRate));
     ctx.emit({
       kind: tackled ? 'tackle' : 'interception',
       side: ctx.defenseSide,
@@ -55,8 +56,8 @@ export class BuildUpPhase implements ActionPhase {
     ctx.outcome = 'defended';
     ctx.momentumShift -= 6;
 
-    // Winning the ball convincingly springs a counter-attack.
-    if (roll.roll - roll.chance > 0.3) ctx.counterAttack = true;
+    // Winning the ball convincingly — or against a team caught upfield — springs a counter-attack.
+    if (roll.roll - roll.chance > 0.3 || ctx.exposedToCounter()) ctx.counterAttack = true;
     ctx.modifiers.afterPhase('buildup', false, ctx);
     if (ctx.counterAttack) {
       ctx.emit({ kind: 'counter', side: ctx.defenseSide, actorId: winner?.id, text: ctx.commentary.line('counter') });

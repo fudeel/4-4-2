@@ -144,7 +144,7 @@ export class ActionContext {
     const team = this.teamOf(player);
     const straightRed = !options.forceYellow && this.rng.chance(0.02);
     const hothead = player.hasTrait('hothead') ? 0.15 : 0;
-    const yellow = options.forceYellow || this.rng.chance(options.yellowChance + hothead);
+    const yellow = options.forceYellow || this.rng.chance(options.yellowChance + hothead + this.modifiers.bookingBonus(team.side));
     if (!straightRed && !yellow) return undefined;
 
     if (!straightRed) {
@@ -159,6 +159,20 @@ export class ActionContext {
       return { playerId: player.id, card: 'red' };
     }
     return { playerId: player.id, card: 'yellow' };
+  }
+
+  /**
+   * The attacking side just lost the ball: did they leave enough space behind them
+   * for a counter-attack? Only attack-minded teams are exposed.
+   */
+  exposedToCounter(): boolean {
+    const exposure = this.modifiers.counterExposure(this.attackSide);
+    return exposure > 0 && this.rng.chance(exposure);
+  }
+
+  /** How often the defending side fouls, relative to normal (mentality and cards). */
+  foulRate(): number {
+    return this.modifiers.foulMultiplier(this.defenseSide);
   }
 
   scoreGoal(scorer: MatchPlayer, assister: MatchPlayer | null): void {

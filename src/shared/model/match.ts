@@ -53,6 +53,8 @@ export interface TeamView {
   ready: boolean;
   /** True once the manager has locked in a card (or a skip) this turn. */
   locked: boolean;
+  /** Defence ↔ Attack slider, −100 … +100 (see `shared/model/tactics`). Visible to both managers, like a team's shape. */
+  mentality: number;
   handCount: number;
   subsUsed: number;
   stats: TeamMatchStats;

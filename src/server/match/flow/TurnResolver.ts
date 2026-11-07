@@ -1,8 +1,10 @@
 import { CARD_DEFINITIONS, type CardInstance } from '../../../shared/model/cards';
-import { otherSide, type ActionReport, type MatchEvent, type RevealedCard, type Side } from '../../../shared/model/match';
+import { SIDES, otherSide, type ActionReport, type MatchEvent, type RevealedCard, type Side } from '../../../shared/model/match';
+import { mentalityBand, mentalityEffects } from '../../../shared/model/tactics';
 import type { Rng } from '../../core/Random';
 import { CardEffectRegistry } from '../cards/CardEffects';
 import { ActionResolver } from '../engine/ActionResolver';
+import { mentalityModifier } from '../engine/MentalityModifier';
 import { ModifierStack, type ActionModifier } from '../engine/modifiers';
 import { FatigueModel } from './MatchDynamics';
 import type { MatchState } from './MatchState';
@@ -33,9 +35,13 @@ export class TurnResolver {
     const minute = this.rng.int((state.turn - 1) * minutesPerTurn + 1, state.turn * minutesPerTurn);
     const scoreBefore = { ...state.score };
 
-    // 1. Reveal and activate cards.
+    // 1. Apply both mentalities, then reveal and activate cards.
+    this.announceMentalityChanges(state, minute);
+    const modifiers: ActionModifier[] = [
+      ...SIDES.map(side => mentalityModifier(side, state.team(side).mentality, attackSide)),
+      ...state.effects.carriedModifiers(state.turn),
+    ];
     const revealed = this.reveal(state);
-    const modifiers: ActionModifier[] = [...state.effects.carriedModifiers(state.turn)];
     const notes: string[] = [];
     for (const card of revealed.filter(c => !c.cancelled)) {
       const team = state.team(card.side);
@@ -76,8 +82,10 @@ export class TurnResolver {
     attack.stats.xg += ctx.xg;
     this.applyMomentum(state, attackSide, ctx.momentumShift);
     state.counterAttack = ctx.counterAttack ? defenseSide : null;
-    this.fatigue.apply(attack, ctx.involved, state.effects.extraFatigue(attackSide));
-    this.fatigue.apply(defense, ctx.involved, state.effects.extraFatigue(defenseSide));
+    for (const team of [attack, defense]) {
+      const extra = state.effects.extraFatigue(team.side) + mentalityEffects(team.mentality).fatigue;
+      this.fatigue.apply(team, ctx.involved, extra);
+    }
     state.effects.tick(state.turn);
     state.possession.record(attackSide);
 
@@ -99,6 +107,17 @@ export class TurnResolver {
     };
     state.commentary.addActionEvents(report.id, minute, events);
     return report;
+  }
+
+  /** A line in the commentary whenever a manager moves the mentality slider into a different band. */
+  private announceMentalityChanges(state: MatchState, minute: number): void {
+    for (const side of SIDES) {
+      const team = state.team(side);
+      const before = mentalityBand(team.appliedMentality);
+      const now = mentalityBand(team.mentality);
+      team.appliedMentality = team.mentality;
+      if (before !== now) state.commentary.info(minute, `${now.icon} ${team.profile.shortName} ${now.verb} (${now.name}).`, side);
+    }
   }
 
   /** Takes the selected cards out of both hands. Mind Games cancels whatever the opponent played. */

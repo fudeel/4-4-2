@@ -18,6 +18,9 @@ interface Scheduled {
   run: () => void;
 }
 
+/** How far (in team space) the whole block moves at full attacking or defensive mentality. */
+const MENTALITY_LINE_SHIFT = 0.09;
+
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const sign = () => (Math.random() < 0.5 ? -1 : 1);
 
@@ -501,6 +504,8 @@ export class MatchDirector {
       ny = 0.025 + MathUtils.clamp(ball.ny * 0.05, 0, 0.05);
     } else {
       if (this.attackingSide) ny += this.attackingSide === actor.side ? 0.1 : -0.06;
+      // Mentality: a defensive team sits deeper, an attacking one pushes its whole block up.
+      ny += (info!.view.mentality / 100) * MENTALITY_LINE_SHIFT;
       ny += (ball.ny - 0.5) * 0.4;
       nx += (ball.nx - nx) * 0.22;
       const t = this.now / 1000;

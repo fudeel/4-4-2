@@ -93,6 +93,7 @@ export class App {
       setLineup: lineup => send({ type: 'setLineup', lineup }),
       setReady: ready => send({ type: 'setReady', ready }),
       playCard: cardInstanceId => send({ type: 'playCard', cardInstanceId }),
+      setMentality: value => send({ type: 'setMentality', value }),
       requestRematch: () => send({ type: 'requestRematch' }),
       shareLink: code => this.identity.shareLink(code),
     };

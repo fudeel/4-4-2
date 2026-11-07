@@ -36,6 +36,7 @@ const TEMPLATES = {
   dive: ['{a} goes down in the box... the referee points to the spot!'],
   diveBooked: ['{a} goes down too easily, booked for simulation!'],
   counter: ['They break forward quickly, counter-attack on!', 'Turnover in midfield, counter-attack chance!'],
+  counterExposed: ['Too many men forward — they break into the space behind!', '{a} wins it and they counter against a stretched defence!'],
 } satisfies Record<string, string[]>;
 
 export type CommentaryKey = keyof typeof TEMPLATES;

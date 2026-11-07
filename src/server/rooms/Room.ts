@@ -92,6 +92,8 @@ export class Room {
         return this.match.setReady(side, message.ready);
       case 'playCard':
         return this.match.playCard(side, message.cardInstanceId);
+      case 'setMentality':
+        return this.match.setMentality(side, message.value);
       case 'requestRematch':
         if (this.match.requestRematch(side)) this.startMatch();
         return;

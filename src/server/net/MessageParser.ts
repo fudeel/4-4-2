@@ -44,6 +44,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
       return data.cardInstanceId === null || isShortString(data.cardInstanceId, 64)
         ? { type: 'playCard', cardInstanceId: data.cardInstanceId as string | null }
         : null;
+    case 'setMentality':
+      return typeof data.value === 'number' && Number.isFinite(data.value) ? { type: 'setMentality', value: data.value } : null;
     case 'requestRematch':
       return { type: 'requestRematch' };
     default:

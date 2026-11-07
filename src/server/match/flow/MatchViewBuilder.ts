@@ -76,6 +76,7 @@ export class MatchViewBuilder {
       manager: team.managerView(),
       ready: team.ready,
       locked: team.selection.locked,
+      mentality: team.mentality,
       handCount: team.hand.size,
       subsUsed: team.subsUsed + team.pendingSubstitutions(),
       stats: { ...team.stats, xg: Math.round(team.stats.xg * 100) / 100 },

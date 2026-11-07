@@ -1,12 +1,14 @@
 import { CARD_DEFINITIONS, isCardPlayable } from '../../../shared/model/cards';
 import { otherSide, type MatchView } from '../../../shared/model/match';
+import { mentalityBand } from '../../../shared/model/tactics';
 import type { GameActions } from '../../state/GameStore';
+import { MentalityBar } from '../components/MentalityBar';
 import { h, render, setText } from '../dom';
 import { cardBack, cardView } from './CardView';
 
 /**
  * The manager's controls for the current turn: who attacks, the countdown,
- * the opponent's status and your hand of cards (pick one, or skip).
+ * the opponent's status, the Defence ↔ Attack slider and your hand of cards (pick one, or skip).
  */
 export class TurnPanel {
   readonly element: HTMLElement;
@@ -19,13 +21,15 @@ export class TurnPanel {
   private readonly hand = h('div', { class: 'hand' });
   private readonly description = h('p', { class: 'turn__desc' });
   private readonly controls = h('div', { class: 'turn__controls' });
+  private readonly mentality: MentalityBar;
   private selected: string | null = null;
   private turnKey = '';
   private view: MatchView | null = null;
 
   constructor(private readonly actions: GameActions) {
     this.banner.append(h('div', { class: 'turn__labels' }, this.title, this.sub), this.timer, h('div', { class: 'turn__bar' }, this.timerFill));
-    this.element = h('section', { class: 'turn' }, this.banner, this.opponent, this.hand, this.description, this.controls);
+    this.mentality = new MentalityBar({ onChange: value => this.actions.setMentality(value), compact: true });
+    this.element = h('section', { class: 'turn' }, this.banner, this.opponent, this.mentality.element, this.hand, this.description, this.controls);
   }
 
   update(view: MatchView): void {
@@ -49,11 +53,14 @@ export class TurnPanel {
 
     const opponent = view.teams[otherSide(view.you)];
     const opponentName = opponent.manager?.name ?? 'Opponent';
+    const theirShape = mentalityBand(opponent.mentality);
     render(this.opponent,
       h('span', null, opponent.manager?.isBot ? '🤖 ' : '', opponentName, ': ',
         planning ? (opponent.locked ? h('b', { class: 'ok' }, 'locked in ✓') : h('b', { class: 'thinking' }, 'thinking…')) : 'watching'),
+      h('span', { class: 'turn__their-shape', title: 'Opponent mentality' }, `${theirShape.icon} ${theirShape.name}`),
       h('span', { class: 'turn__backs' }, Array.from({ length: opponent.handCount }, () => cardBack())),
     );
+    this.mentality.update(view.teams[view.you].mentality, view.phase === 'fulltime');
 
     this.renderHand(view, attacking, planning, locked, turnInHalf);
     this.renderControls(view, planning, locked);

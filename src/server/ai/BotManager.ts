@@ -3,6 +3,7 @@ import { getFormation } from '../../shared/model/formation';
 import { LineupBuilder, type Lineup } from '../../shared/model/lineup';
 import { otherSide, type Side } from '../../shared/model/match';
 import { overallRating } from '../../shared/model/player';
+import { normalizeMentality } from '../../shared/model/tactics';
 import type { Rng } from '../core/Random';
 import type { Scheduler } from '../core/Scheduler';
 import type { Match } from '../match/Match';
@@ -40,6 +41,11 @@ const CARD_VALUES: Record<CardId, CardValuation> = {
   mind_games: () => 0.3,
 };
 
+export interface BotOptions {
+  /** Keeps the mentality slider fixed (used by the balance simulator). */
+  fixedMentality?: number;
+}
+
 /**
  * A computer-controlled manager. It only uses the public `Match` commands, exactly like a human client,
  * and always acts through the scheduler (never re-entrantly inside a change notification).
@@ -53,6 +59,7 @@ export class BotManager {
     private readonly side: Side,
     private readonly scheduler: Scheduler,
     private readonly rng: Rng,
+    private readonly options: BotOptions = {},
   ) {
     this.unsubscribe = match.onChange(() => this.react());
   }
@@ -74,12 +81,18 @@ export class BotManager {
       case 'lobby':
         if (this.team.ready) return;
         this.handledKey = key;
-        this.later(this.rng.int(600, 1200), () => this.match.setReady(this.side, true));
+        this.later(this.rng.int(600, 1200), () => {
+          this.match.setMentality(this.side, this.chooseMentality(state));
+          this.match.setReady(this.side, true);
+        });
         break;
       case 'planning':
         if (this.team.selection.locked) return;
         this.handledKey = key;
-        this.later(this.rng.int(1200, 3500), () => this.match.playCard(this.side, this.chooseCard(state)?.instanceId ?? null));
+        this.later(this.rng.int(1200, 3500), () => {
+          this.match.setMentality(this.side, this.chooseMentality(state));
+          this.match.playCard(this.side, this.chooseCard(state)?.instanceId ?? null);
+        });
         break;
       case 'halftime':
         this.handledKey = key;
@@ -104,6 +117,23 @@ export class BotManager {
         // The match moved on (or the move became invalid) — nothing to do.
       }
     });
+  }
+
+  /**
+   * Protect a lead, chase a deficit — harder as the clock runs down. Tired legs sit deeper.
+   * Level late on, the bot pushes a little for the winner.
+   */
+  private chooseMentality(state: MatchState): number {
+    if (this.options.fixedMentality !== undefined) return this.options.fixedMentality;
+    const goalDifference = state.score[this.side] - state.score[otherSide(this.side)];
+    const progress = state.turn / state.totalTurns;
+    const urgency = 0.35 + progress;
+    let target = -Math.sign(goalDifference) * Math.min(2, Math.abs(goalDifference)) * 32 * urgency;
+    if (goalDifference === 0 && progress > 0.75) target += 20;
+    const onPitch = this.team.onPitch();
+    const energy = onPitch.reduce((sum, fp) => sum + fp.player.energy, 0) / Math.max(1, onPitch.length);
+    if (energy < 45) target -= 10;
+    return normalizeMentality(target + (this.rng.next() - 0.5) * 20);
   }
 
   private chooseCard(state: MatchState): CardInstance | null {

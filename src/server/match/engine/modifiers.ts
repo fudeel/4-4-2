@@ -30,6 +30,12 @@ export interface ActionModifier {
   chooseShooter?(ctx: ActionContext): MatchPlayer | null;
   /** Called after a contested phase has been resolved. */
   afterPhase?(phase: PhaseKind, attackSucceeded: boolean, ctx: ActionContext): void;
+  /** Multiplier on how often `side` commits fouls while defending. */
+  foulMultiplier?(side: Side): number;
+  /** Added to the yellow-card chance of every foul committed by `side`. */
+  bookingBonus?(side: Side): number;
+  /** Chance that `side` concedes a counter-attack when it loses the ball. */
+  counterExposure?(side: Side): number;
 }
 
 export class ModifierStack {
@@ -73,5 +79,17 @@ export class ModifierStack {
 
   afterPhase(phase: PhaseKind, attackSucceeded: boolean, ctx: ActionContext): void {
     for (const modifier of this.modifiers) modifier.afterPhase?.(phase, attackSucceeded, ctx);
+  }
+
+  foulMultiplier(side: Side): number {
+    return this.modifiers.reduce((acc, m) => acc * (m.foulMultiplier?.(side) ?? 1), 1);
+  }
+
+  bookingBonus(side: Side): number {
+    return this.modifiers.reduce((acc, m) => acc + (m.bookingBonus?.(side) ?? 0), 0);
+  }
+
+  counterExposure(side: Side): number {
+    return this.modifiers.reduce((acc, m) => acc + (m.counterExposure?.(side) ?? 0), 0);
   }
 }
