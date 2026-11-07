@@ -6,6 +6,8 @@ import { ManualScheduler } from '../src/server/core/Scheduler';
 import { SEED_PLAYERS, SEED_TEAMS } from '../src/server/data/seed';
 import { Match } from '../src/server/match/Match';
 import { simulateBotMatch } from '../src/server/sim/BotMatchSimulator';
+import { ActionContext } from '../src/server/match/engine/ActionContext';
+import { ModifierStack } from '../src/server/match/engine/modifiers';
 import type { CardId } from '../src/shared/model/cards';
 import type { Side } from '../src/shared/model/match';
 
@@ -208,5 +210,47 @@ describe('mentality', () => {
     expect(defensive.scored).toBeLessThan(balanced.scored);
     expect(attacking.scored).toBeGreaterThan(balanced.scored);
     expect(attacking.conceded).toBeGreaterThan(balanced.conceded);
+  });
+});
+
+describe('player decisions', () => {
+  it('matches players by zone: forwards are confronted by defenders, defenders by forwards', () => {
+    const { match } = createHumanMatch();
+    const attack = match.state.team('home');
+    const defense = match.state.team('away');
+    const ctx = new ActionContext({
+      attack, defense, modifiers: new ModifierStack(), rng: new SeededRng(3), minute: 1, momentumFor: () => 0,
+    });
+    const count = (role: 'FWD' | 'DEF') => {
+      const player = attack.inRoles(role)[0]!.player;
+      const roles = new Map<string, number>();
+      for (let i = 0; i < 300; i++) {
+        const opponent = ctx.opponentOf(player, { defending: 1 })!;
+        roles.set(opponent.role, (roles.get(opponent.role) ?? 0) + 1);
+      }
+      return roles;
+    };
+    expect(count('FWD').get('DEF') ?? 0).toBeGreaterThan(210);
+    expect(count('DEF').get('FWD') ?? 0).toBeGreaterThan(210);
+  });
+
+  it('creates chances in varied ways, and shoots from distance more against a packed defence', () => {
+    const styles = (awayMentality: number) => {
+      const counts = new Map<string, number>();
+      for (let seed = 1; seed <= 150; seed++) {
+        simulateBotMatch(seed, undefined, false, {
+          mentality: { home: 0, away: awayMentality },
+          onAction: report => {
+            const style = report.attackingSide === 'home' ? report.events.find(e => e.style)?.style : undefined;
+            if (style) counts.set(style, (counts.get(style) ?? 0) + 1);
+          },
+        });
+      }
+      return counts;
+    };
+    const open = styles(0);
+    for (const style of ['through', 'cross', 'cutback', 'solo', 'long_shot']) expect(open.get(style) ?? 0).toBeGreaterThan(10);
+    const share = (counts: Map<string, number>) => (counts.get('long_shot') ?? 0) / [...counts.values()].reduce((a, b) => a + b, 0);
+    expect(share(styles(-100))).toBeGreaterThan(share(open));
   });
 });

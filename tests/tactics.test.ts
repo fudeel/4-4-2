@@ -119,3 +119,51 @@ describe('ball planner', () => {
     }
   });
 });
+
+describe('defensive organisation', () => {
+  const setup = () => {
+    const players = [...team('home', '2-2-1', 0.15), ...team('away', '3-1-1')];
+    const holder = players.find(p => p.actor.side === 'home' && p.slot.role === 'MID')!.actor;
+    return { players, holder, ctx: context(players, holder.position.clone(), 'home', holder) };
+  };
+
+  it('holds a flat back line set by the ball, without being walked back by onside strikers', () => {
+    const { players, ctx } = setup();
+    const targets = settle(new TeamShape(), ctx, 20);
+    const ballDepth = space.toTeam('away', ctx.ball).ny;
+    const depths = players
+      .filter(p => p.actor.side === 'away' && p.slot.role === 'DEF')
+      .map(p => targets.get(p.actor.id)!)
+      .filter(t => t.distanceTo(ctx.ball) > 7) // the presser and the cover step out of the line
+      .map(t => space.toTeam('away', t).ny);
+    expect(depths.length).toBeGreaterThan(1);
+    for (const d of depths) {
+      expect(d).toBeCloseTo(depths[0]!, 2);
+      expect(d).toBeLessThan(ballDepth);
+    }
+  });
+
+  it('presses with one player and covers behind him with another', () => {
+    const { players, ctx } = setup();
+    const targets = settle(new TeamShape(), ctx);
+    const goal = space.toWorld('away', 0, 0);
+    const defenders = players.filter(p => p.actor.side === 'away' && p.slot.role !== 'GK');
+    const presser = defenders.find(p => targets.get(p.actor.id)!.distanceTo(ctx.ball) < 3);
+    expect(presser).toBeDefined();
+    const cover = defenders.find(p => p !== presser && Math.abs(targets.get(p.actor.id)!.distanceTo(ctx.ball) - 6) < 0.5);
+    expect(cover).toBeDefined();
+    // The cover stands between the ball and the goal.
+    expect(targets.get(cover!.actor.id)!.distanceTo(goal)).toBeLessThan(ctx.ball.distanceTo(goal));
+  });
+
+  it('puts the keeper on the line between the ball and the centre of the goal', () => {
+    const { players, ctx } = setup();
+    ctx.ball.copy(space.toWorld('away', 0.6, 0.3));
+    const keeper = players.find(p => p.actor.side === 'away' && p.slot.role === 'GK')!;
+    const at = space.toTeam('away', new TeamShape().compute(ctx).get(keeper.actor.id)!);
+    // Shifted towards the ball's side, a few metres off the line.
+    expect(at.nx).toBeGreaterThan(0.05);
+    expect(at.ny * 48).toBeGreaterThan(1.5);
+    expect(at.ny * 48).toBeLessThan(5);
+  });
+});

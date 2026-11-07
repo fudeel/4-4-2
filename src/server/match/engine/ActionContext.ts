@@ -1,5 +1,7 @@
+import { getFormation } from '../../../shared/model/formation';
 import type {
   ActionOutcome,
+  ChanceStyle,
   DiceRoll,
   MatchEvent,
   MatchEventKind,
@@ -33,6 +35,15 @@ export interface ActionSetup {
 
 export type EventDraft = Omit<MatchEvent, 'durationMs'> & { durationMs?: number };
 
+/** How far up the pitch attackers push, and defenders drop, from their formation spots (team space). */
+const ATTACK_PUSH = 0.12;
+const DEFENSE_DROP = -0.04;
+/** Pitch size in metres per unit of team space (matches the 3D pitch: 30 × 48 m). */
+const METRES_ACROSS = 14;
+const METRES_ALONG = 48;
+/** Radius of a player's zone of responsibility, in metres. */
+const ZONE_RADIUS = 7;
+
 /** Mutable state of one action (one turn) while it is being resolved. */
 export class ActionContext {
   readonly attack: TeamState;
@@ -45,7 +56,7 @@ export class ActionContext {
 
   readonly events: MatchEvent[] = [];
   readonly involved = new Set<string>();
-  readonly flags = { longBall: false, oneOnOne: false };
+  readonly flags: { longBall: boolean; oneOnOne: boolean; chanceStyle: ChanceStyle | null } = { longBall: false, oneOnOne: false, chanceStyle: null };
 
   carrier: MatchPlayer | null = null;
   creator: MatchPlayer | null = null;
@@ -117,6 +128,56 @@ export class ActionContext {
       const score = this.ratings.playerScore(fp, team.side, skill, 'special');
       return (roleWeights[fp.role] ?? 0) * Math.pow(Math.max(score, 1), 1.5);
     });
+  }
+
+  /**
+   * Where a player operates, in their team's space (x −1…1 across, y 0…1 from their own goal):
+   * their formation spot, pushed up while their team attacks and dropped while it defends.
+   */
+  spotOf(team: TeamState, fp: FieldPlayer): { x: number; y: number } {
+    const slot = getFormation(team.lineup.formationId).slots[fp.slot]!;
+    const push = team === this.attack ? ATTACK_PUSH : DEFENSE_DROP;
+    return { x: slot.x, y: clamp(slot.y + push, 0.03, 0.95) };
+  }
+
+  /**
+   * The opponent who deals with `player`: zonal marking from both formations — the opponent whose
+   * spot faces the player's spot — leaning towards the better one at `skill` only where zones overlap.
+   */
+  opponentOf(player: MatchPlayer, skill: AttributeWeights, roles: Position[] = ['DEF', 'MID', 'FWD']): FieldPlayer | null {
+    const own = this.teamOf(player);
+    const fp = own.fieldPlayer(player.id);
+    const other = own === this.attack ? this.defense : this.attack;
+    const candidates = other.onPitch().filter(c => roles.includes(c.role));
+    if (!fp || candidates.length === 0) return null;
+    // The zone decides; skill only tips it where two zones overlap.
+    return this.rng.weighted(candidates, c => {
+      const score = this.ratings.playerScore(c, other.side, skill, 'special');
+      return Math.pow(this.zoneOverlap(own, fp, other, c), 2) * Math.pow(Math.max(score, 1), 0.75);
+    });
+  }
+
+  /** How free a player is (≈0.5 tightly marked by a strong defender … 1.2 nobody near). */
+  freedom(player: MatchPlayer): number {
+    const own = this.teamOf(player);
+    const fp = own.fieldPlayer(player.id);
+    const other = own === this.attack ? this.defense : this.attack;
+    if (!fp) return 1;
+    let pressure = 0;
+    for (const c of other.outfield()) {
+      const defending = this.ratings.playerScore(c, other.side, { defending: 0.7, pace: 0.3 }, 'special');
+      pressure = Math.max(pressure, this.zoneOverlap(own, fp, other, c) * defending / 100);
+    }
+    return clamp(1.2 - pressure * 0.8, 0.45, 1.2);
+  }
+
+  /** 1 when two players' zones face each other exactly, falling off over ~7 metres. */
+  private zoneOverlap(team: TeamState, fp: FieldPlayer, opponents: TeamState, opponent: FieldPlayer): number {
+    const at = this.spotOf(team, fp);
+    const them = this.spotOf(opponents, opponent);
+    // Mirror into the opponents' space: their left is our right, their goal line our attacking line.
+    const metres = Math.hypot((them.x + at.x) * METRES_ACROSS, (them.y - (1 - at.y)) * METRES_ALONG);
+    return Math.exp(-(metres * metres) / (2 * ZONE_RADIUS * ZONE_RADIUS));
   }
 
   /** The best on-pitch player of a team at a skill. */

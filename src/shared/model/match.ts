@@ -116,6 +116,9 @@ export type MatchEventKind =
 
 export type ShotResult = 'goal' | 'saved' | 'missed' | 'blocked';
 
+/** How a chance was made. The engine picks the option that suits the players; the client choreographs each one. */
+export type ChanceStyle = 'through' | 'cross' | 'cutback' | 'solo' | 'long_shot';
+
 export interface MatchEvent {
   kind: MatchEventKind;
   /** The side performing the event. */
@@ -127,6 +130,8 @@ export interface MatchEvent {
   roll?: DiceRoll;
   booking?: { playerId: string; card: 'yellow' | 'red' };
   shotResult?: ShotResult;
+  /** Set on the event that creates a chance. */
+  style?: ChanceStyle;
 }
 
 export type ActionOutcome =

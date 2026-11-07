@@ -1,9 +1,13 @@
 import type { DiceRoll } from '../../../../shared/model/match';
-import type { MatchPlayer } from '../../model/MatchPlayer';
+import type { Position } from '../../../../shared/model/player';
+import type { FieldPlayer } from '../../model/TeamState';
 import type { ActionContext } from '../ActionContext';
 import type { PhaseKind } from '../modifiers';
-import { PROFILES, SKILLS } from '../RatingCalculator';
+import { PROFILES, SKILLS, clamp } from '../RatingCalculator';
 import type { ActionPhase } from './ActionPhase';
+
+/** How keen a carrier is to find each line with the ball: forwards first. */
+const OUTLET_PREFERENCE: Partial<Record<Position, number>> = { DEF: 0.15, MID: 0.7, FWD: 1 };
 
 /** Midfield battle: can the attacking team get the ball into the final third? */
 export class BuildUpPhase implements ActionPhase {
@@ -11,9 +15,10 @@ export class BuildUpPhase implements ActionPhase {
 
   play(ctx: ActionContext): PhaseKind | null {
     const carrierFp = ctx.pick(ctx.attack, { DEF: 0.35, MID: 1, FWD: 0.2 }, SKILLS.passing);
-    const presserFp = ctx.pick(ctx.defense, { DEF: 0.4, MID: 1, FWD: 0.6 }, SKILLS.pressing);
     if (!carrierFp) return null;
     const carrier = carrierFp.player;
+    // The opponent whose zone the carrier is in steps up to press him.
+    const presserFp = ctx.opponentOf(carrier, SKILLS.pressing);
     ctx.carrier = carrier;
     ctx.emit({ kind: 'buildup', side: ctx.attackSide, actorId: carrier.id, text: ctx.commentary.line('buildup', carrier) });
 
@@ -23,7 +28,7 @@ export class BuildUpPhase implements ActionPhase {
     const roll = ctx.roll('buildup', 'Build-up', chance, ctx.attackSide);
 
     if (roll.success) {
-      this.progress(ctx, carrierFp.player, presserFp?.player ?? null, roll);
+      this.progress(ctx, carrierFp, presserFp, roll);
       ctx.modifiers.afterPhase('buildup', true, ctx);
       return 'chance';
     }
@@ -42,7 +47,11 @@ export class BuildUpPhase implements ActionPhase {
     }
 
     const winner = presserFp?.player ?? null;
-    const tackled = ctx.rng.chance(Math.min(0.8, 0.5 * foulRate));
+    // Strong, aggressive defenders go to ground; quick, clever ones read the pass.
+    const style = presserFp
+      ? (ctx.ratings.playerScore(presserFp, ctx.defenseSide, { physical: 1 }, 'buildup') - ctx.ratings.playerScore(presserFp, ctx.defenseSide, { pace: 0.6, passing: 0.4 }, 'buildup')) / 80
+      : 0;
+    const tackled = ctx.rng.chance(clamp(0.5 * foulRate + style, 0.2, 0.85));
     ctx.emit({
       kind: tackled ? 'tackle' : 'interception',
       side: ctx.defenseSide,
@@ -65,17 +74,42 @@ export class BuildUpPhase implements ActionPhase {
     return null;
   }
 
-  private progress(ctx: ActionContext, carrier: MatchPlayer, presser: MatchPlayer | null, roll: DiceRoll): void {
-    const receiverFp = ctx.pick(ctx.attack, { DEF: 0.1, MID: 0.6, FWD: 1 }, SKILLS.passing, [carrier]);
-    const receiver = receiverFp?.player ?? carrier;
-    if (presser && ctx.rng.chance(0.45)) {
+  /**
+   * The carrier beat the press. Does he take his man on or play the pass? He does what he's
+   * better at against this particular opponent — a dribbler beats a slow marker, a passer
+   * finds the free man.
+   */
+  private progress(ctx: ActionContext, carrierFp: FieldPlayer, presserFp: FieldPlayer | null, roll: DiceRoll): void {
+    const carrier = carrierFp.player;
+    const outlet = this.outlet(ctx, carrierFp);
+    let dribble = presserFp !== null && outlet === null;
+    if (presserFp && outlet) {
+      const beatHim = (ctx.ratings.playerScore(carrierFp, ctx.attackSide, { dribbling: 0.7, pace: 0.3 }, 'buildup') -
+        ctx.ratings.playerScore(presserFp, ctx.defenseSide, SKILLS.pressing, 'buildup')) / 30 - 0.25;
+      const findHim = (ctx.ratings.playerScore(carrierFp, ctx.attackSide, SKILLS.passing, 'buildup') - 65) / 25 + (ctx.freedom(outlet.player) - 0.85);
+      dribble = beatHim + (ctx.rng.next() - 0.5) * 0.5 > findHim;
+    }
+
+    if (dribble && presserFp) {
+      const presser = presserFp.player;
       ctx.emit({ kind: 'dribble', side: ctx.attackSide, actorId: carrier.id, targetId: presser.id, text: ctx.commentary.line('dribble', carrier, presser), roll });
       presser.adjustRating(-0.05);
     } else {
+      const receiver = outlet?.player ?? carrier;
       ctx.emit({ kind: 'pass', side: ctx.attackSide, actorId: carrier.id, targetId: receiver.id, text: ctx.commentary.line('pass', carrier, receiver), roll });
       ctx.carrier = receiver;
     }
     carrier.adjustRating(0.1);
     ctx.momentumShift += 5;
+  }
+
+  /** The pass that moves the ball on: forwards before midfielders, free players before marked ones. */
+  private outlet(ctx: ActionContext, carrierFp: FieldPlayer): FieldPlayer | null {
+    const options = ctx.attack.outfield().filter(fp => fp.player !== carrierFp.player);
+    if (options.length === 0) return null;
+    return ctx.rng.weighted(options, fp =>
+      (OUTLET_PREFERENCE[fp.role] ?? 0) *
+      Math.pow(Math.max(ctx.ratings.playerScore(fp, ctx.attackSide, SKILLS.passing, 'buildup'), 1), 1.2) *
+      Math.pow(ctx.freedom(fp.player), 2.5));
   }
 }

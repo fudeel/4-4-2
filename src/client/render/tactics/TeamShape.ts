@@ -41,6 +41,18 @@ const PERSONAL_SPACE = 6.5;
 const SUPPORT_DISTANCE = 10;
 /** The presser stops this far from the carrier, goal-side (metres). */
 const PRESS_DISTANCE = 2.2;
+/** The covering player sits this far behind the presser, on the way to goal (metres). */
+const COVER_DISTANCE = 6;
+/** The back line holds this far behind the ball (team space ≈ 9.6 m)… */
+const BALL_TO_LINE = 0.2;
+/** …and each line of the block sits this far in front of the one behind it (≈ 7 m). */
+const LINE_GAP = 0.15;
+/** How far a defender looks for an attacker to pick up, and a midfielder (metres). */
+const DEFENDER_REACH = 10;
+const MIDFIELDER_REACH = 8;
+/** An attacker this far beyond the back line (team space ≈ 1.5 m) has made a run that must be tracked. */
+const LINE_BREAK = 0.03;
+const ROLE_ORDER: Record<FormationSlot['role'], number> = { GK: 0, DEF: 1, MID: 2, FWD: 3 };
 /** Metres per unit of team space, across and along the pitch. */
 const METRES_X = PITCH.width / 2 - 1;
 const METRES_Y = PITCH.length;
@@ -51,8 +63,10 @@ const METRES_Y = PITCH.length;
  *
  * In possession the team stretches the pitch: full width, forwards on the shoulder of the last
  * defender, the two nearest teammates offering a forward angle and a safe recycle option.
- * Out of possession it shrinks: narrow, shifted to the ball side, goal-side of the ball,
- * with the nearest player closing the carrier down.
+ * Out of possession it becomes a compact block: a flat back line whose height is set by the
+ * ball, defenders picking up the attackers in their zone goal-side, midfielders screening in
+ * front of them, forwards cutting the pass back, the nearest player pressing, the next one
+ * covering behind him, and the keeper on the line between ball and goal.
  */
 export class TeamShape {
   private readonly targets = new Map<string, Vector3>();
@@ -69,15 +83,20 @@ export class TeamShape {
 
       if (ctx.possession === null) {
         for (const p of team) spots.set(p, this.restingSpot(p.slot));
+        this.separate(ctx, spots, new Set());
       } else if (ctx.possession === side) {
         const lastLine = this.offsideLine(ctx, side);
-        for (const p of team) spots.set(p, p.slot.role === 'GK' ? this.keeperSpot(ball, true) : this.attackingSpot(p.slot, ball, mentality, lastLine));
+        for (const p of team) spots.set(p, p.slot.role === 'GK' ? this.keeperInPossession(ball) : this.attackingSpot(p.slot, ball, mentality, lastLine));
         this.offerSupport(ctx, side, team, spots);
+        this.separate(ctx, spots, new Set());
+        // Nobody drifts offside while the team keeps the ball (runs in behind are choreographed).
+        const onside = Math.max(lastLine - 0.012, ball.ny);
+        for (const [p, spot] of spots) if (p.slot.role !== 'GK') spot.ny = Math.min(spot.ny, onside);
       } else {
-        for (const p of team) spots.set(p, p.slot.role === 'GK' ? this.keeperSpot(ball, false) : this.defendingSpot(p.slot, ball, mentality));
+        this.defend(ctx, side, team, ball, mentality, spots);
+        // The back line stays flat: defenders only space out sideways.
+        this.separate(ctx, spots, new Set(team.filter(p => p.slot.role === 'DEF')));
       }
-
-      this.separate(ctx, spots);
       for (const [p, spot] of spots) {
         const target = this.targets.get(p.actor.id) ?? new Vector3();
         ctx.space.toWorld(side, spot.nx, spot.ny, 0, target);
@@ -114,27 +133,78 @@ export class TeamShape {
     return { nx: MathUtils.clamp(nx, -0.92, 0.92), ny };
   }
 
-  private defendingSpot(slot: FormationSlot, ball: Spot, mentality: number): Spot {
-    const push = -0.04 + mentality * MENTALITY_LINE_SHIFT;
-    let ny = slot.y + push + (ball.ny - 0.5) * 0.42;
-    // Narrow and shifted to the ball side.
-    const nx = slot.x * 0.72 + ball.nx * 0.32;
-    switch (slot.role) {
-      case 'DEF':
-        ny = MathUtils.clamp(Math.min(ny, ball.ny - 0.04), 0.06, 0.45);
-        break;
-      case 'MID':
-        ny = MathUtils.clamp(Math.min(ny, ball.ny - 0.02), 0.12, 0.62);
-        break;
-      default:
-        ny = MathUtils.clamp(ny, 0.3, 0.68);
+  /** Out of possession: the block, line by line (see the class comment). */
+  private defend(ctx: ShapeContext, side: Side, team: ShapePlayer[], ball: Spot, mentality: number, spots: Map<ShapePlayer, Spot>): void {
+    const line = backLine(ball, mentality);
+    const attackers = ctx.players
+      .filter(p => p.actor.side !== side && p.slot.role !== 'GK')
+      .map(p => ({ player: p, at: ctx.space.toTeam(side, p.actor.position) }));
+    const marked = new Set<ShapePlayer>();
+    const pickUp = (zone: Spot, reach: number): Spot | null => {
+      let best: { player: ShapePlayer; at: Spot } | null = null;
+      let bestDistance = reach;
+      for (const attacker of attackers) {
+        if (marked.has(attacker.player)) continue;
+        const d = metres(zone, attacker.at);
+        if (d < bestDistance) {
+          bestDistance = d;
+          best = attacker;
+        }
+      }
+      if (!best) return null;
+      marked.add(best.player);
+      return best.at;
+    };
+    // Their deepest player (nearest their own goal): forwards stand in the way of the pass back to him.
+    const deepest = attackers.reduce<Spot | null>((acc, a) => (!acc || a.at.ny > acc.ny ? a.at : acc), null);
+
+    // Defenders choose their man first, then midfielders.
+    for (const p of [...team].sort((a, b) => ROLE_ORDER[a.slot.role] - ROLE_ORDER[b.slot.role])) {
+      const { slot } = p;
+      switch (slot.role) {
+        case 'GK':
+          spots.set(p, this.keeperGuard(ball));
+          break;
+        case 'DEF': {
+          const zone = { nx: slot.x * 0.62 + ball.nx * 0.3, ny: line };
+          const man = pickUp(zone, DEFENDER_REACH);
+          // Pick up the attacker in his zone from the line; only an attacker already beyond the
+          // line (a run in behind) drags the defender back goal-side of him. Holding the line
+          // otherwise matters: dropping for an onside striker would walk the whole line back.
+          const beyond = man !== null && man.ny < line - LINE_BREAK;
+          spots.set(p, man ? { nx: MathUtils.lerp(zone.nx, man.nx, 0.55), ny: beyond ? man.ny - 0.03 : line } : zone);
+          break;
+        }
+        case 'MID': {
+          const ny = MathUtils.clamp(Math.min(line + LINE_GAP, ball.ny - 0.03), line + 0.05, 0.65);
+          const zone = { nx: slot.x * 0.6 + ball.nx * 0.38, ny };
+          const man = pickUp(zone, MIDFIELDER_REACH);
+          spots.set(p, man ? { nx: MathUtils.lerp(zone.nx, man.nx, 0.35), ny: MathUtils.lerp(ny, Math.min(ny, man.ny - 0.03), 0.35) } : zone);
+          break;
+        }
+        default: {
+          const ny = MathUtils.clamp(line + LINE_GAP * 2 + mentality * 0.08, 0.3, 0.7);
+          const screen = deepest
+            ? { nx: MathUtils.lerp(ball.nx, deepest.nx, 0.4), ny: Math.max(ny, MathUtils.lerp(ball.ny, deepest.ny, 0.4)) }
+            : { nx: slot.x * 0.5 + ball.nx * 0.3, ny };
+          spots.set(p, { nx: MathUtils.clamp(screen.nx, -0.85, 0.85), ny: MathUtils.clamp(screen.ny, 0.3, 0.92) });
+        }
+      }
     }
-    return { nx: MathUtils.clamp(nx, -0.85, 0.85), ny };
   }
 
-  private keeperSpot(ball: Spot, inPossession: boolean): Spot {
-    const ny = 0.025 + MathUtils.clamp(ball.ny, 0, 0.7) * (inPossession ? 0.1 : 0.06);
-    return { nx: MathUtils.clamp(ball.nx * 0.15, -0.12, 0.12), ny };
+  /** On the line from the centre of the goal to the ball: further off the line the further away it is. */
+  private keeperGuard(ball: Spot): Spot {
+    const dx = ball.nx * METRES_X;
+    const dy = Math.max(0.5, ball.ny * METRES_Y);
+    const distance = Math.hypot(dx, dy);
+    const out = MathUtils.clamp(1 + distance * 0.07, 1, 4.5);
+    return { nx: MathUtils.clamp(((dx / distance) * out) / METRES_X, -0.2, 0.2), ny: ((dy / distance) * out) / METRES_Y + 0.004 };
+  }
+
+  /** In possession the keeper steps off his line to offer a safe pass back. */
+  private keeperInPossession(ball: Spot): Spot {
+    return { nx: MathUtils.clamp(ball.nx * 0.15, -0.12, 0.12), ny: 0.025 + MathUtils.clamp(ball.ny, 0, 0.7) * 0.1 };
   }
 
   /**
@@ -185,47 +255,48 @@ export class TeamShape {
     return left === right ? 0 : left < right ? -1 : 1;
   }
 
-  /** The nearest outfield player closes down the ball, staying goal-side of it. */
+  /**
+   * The nearest outfield player closes the ball down, goal-side of it; the next nearest
+   * (not a forward) drops in behind him, so one dribble doesn't beat the whole team.
+   */
   private press(ctx: ShapeContext, side: Side, team: ShapePlayer[]): void {
-    let presser: ShapePlayer | null = null;
-    let best = Infinity;
-    for (const p of team) {
-      if (p.slot.role === 'GK') continue;
-      const d = p.actor.position.distanceToSquared(ctx.ball);
-      if (d < best) {
-        best = d;
-        presser = p;
-      }
-    }
+    const chasers = team
+      .filter(p => p.slot.role !== 'GK')
+      .sort((a, b) => a.actor.position.distanceToSquared(ctx.ball) - b.actor.position.distanceToSquared(ctx.ball));
+    const presser = chasers[0];
     if (!presser) return;
-    const ownGoal = ctx.space.toWorld(side, 0, 0, 0, this.tmp);
-    const toGoal = ownGoal.sub(ctx.ball).setY(0);
-    const target = this.targets.get(presser.actor.id)!;
-    target.copy(ctx.ball).setY(0).addScaledVector(toGoal.normalize(), PRESS_DISTANCE);
+    const toGoal = ctx.space.toWorld(side, 0, 0, 0, this.tmp).sub(ctx.ball).setY(0);
+    const distanceToGoal = toGoal.length();
+    toGoal.normalize();
+    this.targets.get(presser.actor.id)!.copy(ctx.ball).setY(0).addScaledVector(toGoal, PRESS_DISTANCE);
+    const cover = chasers.slice(1).find(p => p.slot.role !== 'FWD');
+    if (cover && distanceToGoal > COVER_DISTANCE + 3) {
+      this.targets.get(cover.actor.id)!.copy(ctx.ball).setY(0).addScaledVector(toGoal, COVER_DISTANCE);
+    }
   }
 
   /**
-   * The offside line for `side`'s attackers: the second-last opponent (the keeper is usually
-   * the last), never inside the attackers' own half. In the attackers' team space.
+   * The offside line for `side`'s attackers, in their team space: the line the defenders intend
+   * to hold (set by the ball, see `backLine`), never inside the attackers' own half. Reading the
+   * defenders' intent rather than their current positions keeps the two shapes from chasing
+   * each other towards goal.
    */
   private offsideLine(ctx: ShapeContext, side: Side): number {
-    const depths = ctx.players
-      .filter(p => p.actor.side === otherSide(side))
-      .map(p => ctx.space.toTeam(side, p.actor.position).ny)
-      .sort((a, b) => b - a);
-    return Math.max(0.5, depths[1] ?? depths[0] ?? 0.5);
+    const defenders = otherSide(side);
+    const line = backLine(ctx.space.toTeam(defenders, ctx.ball), ctx.mentality[defenders] / 100);
+    return Math.max(0.5, 1 - line);
   }
 
-  /** Pushes teammates apart when they crowd the same patch of grass. */
-  private separate(ctx: ShapeContext, spots: Map<ShapePlayer, Spot>): void {
+  /** Pushes teammates apart when they crowd the same patch of grass. Players in `holdDepth` only move sideways. */
+  private separate(ctx: ShapeContext, spots: Map<ShapePlayer, Spot>, holdDepth: ReadonlySet<ShapePlayer>): void {
     const entries = [...spots.entries()].filter(([p]) => p.slot.role !== 'GK' && p.actor !== ctx.holder);
     const minX = PERSONAL_SPACE / METRES_X;
     const minY = PERSONAL_SPACE / METRES_Y;
     for (let pass = 0; pass < 2; pass++) {
       for (let i = 0; i < entries.length; i++) {
         for (let j = i + 1; j < entries.length; j++) {
-          const a = entries[i]![1];
-          const b = entries[j]![1];
+          const [pa, a] = entries[i]!;
+          const [pb, b] = entries[j]!;
           // In units of personal space, so the test is a circle on the grass.
           const dx = (b.nx - a.nx) / minX;
           const dy = (b.ny - a.ny) / minY;
@@ -235,11 +306,21 @@ export class TeamShape {
           const ux = d > 1e-4 ? dx / d : 1;
           const uy = d > 1e-4 ? dy / d : 0;
           a.nx -= ux * push * minX;
-          a.ny -= uy * push * minY;
           b.nx += ux * push * minX;
-          b.ny += uy * push * minY;
+          if (!holdDepth.has(pa)) a.ny -= uy * push * minY;
+          if (!holdDepth.has(pb)) b.ny += uy * push * minY;
         }
       }
     }
   }
+}
+
+/** Distance between two team-space spots, in metres. */
+function metres(a: Spot, b: Spot): number {
+  return Math.hypot((a.nx - b.nx) * METRES_X, (a.ny - b.ny) * METRES_Y);
+}
+
+/** Where a defending team holds its back line: a set distance behind the ball, higher when attack-minded. */
+function backLine(ball: Spot, mentality: number): number {
+  return MathUtils.clamp(ball.ny - BALL_TO_LINE + mentality * MENTALITY_LINE_SHIFT * 0.7, 0.07, 0.42);
 }

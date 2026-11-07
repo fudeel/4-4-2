@@ -13,16 +13,26 @@ export class ShotPhase implements ActionPhase {
 
   play(ctx: ActionContext): PhaseKind | null {
     if (!ctx.shooter) return null;
-    return this.finisher.resolve(ctx, {
-      shooter: ctx.shooter,
-      assister: ctx.creator,
-      quality: ctx.chanceQuality,
-      skill: SKILLS.shooting,
-      stage: 'shot',
-      baseBlockChance: 0.1,
-      accuracyBase: 0.34,
-      goalBase: 0.47,
-    });
+    const open = { shooter: ctx.shooter, assister: ctx.creator, stage: 'shot' as const };
+    switch (ctx.flags.chanceStyle) {
+      case 'cross':
+        // Met with the head: harder to place, but hard for defenders to block.
+        return this.finisher.resolve(ctx, {
+          ...open, quality: ctx.chanceQuality, skill: SKILLS.heading, eventKind: 'header',
+          baseBlockChance: 0.06, accuracyBase: 0.3, goalBase: 0.47,
+        });
+      case 'long_shot':
+        // From the edge of the box: bodies in the way and a keeper who sees it coming.
+        return this.finisher.resolve(ctx, {
+          ...open, quality: ctx.chanceQuality * 0.85, skill: SKILLS.shooting,
+          baseBlockChance: 0.18, accuracyBase: 0.32, goalBase: 0.45,
+        });
+      default:
+        return this.finisher.resolve(ctx, {
+          ...open, quality: ctx.chanceQuality, skill: SKILLS.shooting,
+          baseBlockChance: 0.1, accuracyBase: 0.34, goalBase: 0.47,
+        });
+    }
   }
 }
 
@@ -57,8 +67,9 @@ class AerialDelivery {
 
   deliver(ctx: ActionContext, deliverer: MatchPlayer): PhaseKind | null {
     const attackerFp = ctx.pick(ctx.attack, { DEF: 0.8, MID: 0.5, FWD: 1 }, SKILLS.aerialDuel, [deliverer]);
-    const defenderFp = ctx.pick(ctx.defense, { DEF: 1, MID: 0.5, FWD: 0.2 }, SKILLS.aerialDuel);
     if (!attackerFp) return null;
+    // Each attacker in the box has his marker: that's who he has to beat in the air.
+    const defenderFp = ctx.opponentOf(attackerFp.player, SKILLS.aerialDuel);
 
     const attack = ctx.ratings.playerScore(attackerFp, ctx.attackSide, SKILLS.aerialDuel, 'aerial');
     const defense = defenderFp ? ctx.ratings.playerScore(defenderFp, ctx.defenseSide, SKILLS.aerialDuel, 'aerial') : 20;

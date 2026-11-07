@@ -94,6 +94,8 @@ export class PlayerActor {
   readonly target = new Vector3();
   /** Until this time (ms) the director's choreography owns the target, not the team shape. */
   scriptedUntil = 0;
+  /** Until this time (ms) the player sprints back into shape (e.g. after losing the ball). */
+  private hurryUntil = 0;
   readonly seed: number;
   private readonly rig = new Group();
   private readonly hips = new Group();
@@ -229,6 +231,11 @@ export class PlayerActor {
     if (scriptedForMs > 0) this.scriptedUntil = Math.max(this.scriptedUntil, now + scriptedForMs);
   }
 
+  /** Sprint (rather than jog) back into position until `until` (ms). */
+  hurry(until: number): void {
+    this.hurryUntil = Math.max(this.hurryUntil, until);
+  }
+
   teleport(point: Vector3): void {
     this.position.set(point.x, 0, point.z);
     this.target.copy(this.position);
@@ -258,7 +265,7 @@ export class PlayerActor {
     // easing in so players settle on their spot instead of overshooting it.
     let desired = 0;
     if (this.pose !== 'fallen' && distance > 0.05) {
-      const urgent = now < this.scriptedUntil || distance > SPRINT_DISTANCE;
+      const urgent = now < this.scriptedUntil || now < this.hurryUntil || distance > SPRINT_DISTANCE;
       desired = Math.min(urgent ? this.speed : this.speed * JOG_FACTOR, distance * 2.2);
     }
     const ax = distance > 0.05 ? (dx / distance) * desired : 0;

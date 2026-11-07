@@ -21,6 +21,9 @@ interface Scheduled {
   run: () => void;
 }
 
+/** How long a team that just lost the ball sprints back into shape. */
+const RECOVERY_MS = 2600;
+
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const sign = () => (Math.random() < 0.5 ? -1 : 1);
 
@@ -49,6 +52,7 @@ export class MatchDirector {
   private actionRunning = false;
   private preparedTurn = -1;
   private nextBallDecision = 0;
+  private lastPossession: Side | null = null;
   private pendingReceiver: { actor: PlayerActor; at: number } | null = null;
   private highlighted: PlayerActor[] = [];
   private now = 0;
@@ -218,8 +222,14 @@ export class MatchDirector {
 
       case 'pass':
         if (actor && this.ball.holder !== actor) this.ball.giveTo(actor);
-        // Played into space in front of the receiver, where no defender is waiting.
-        if (target) this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.85, 0.64), d * 0.8);
+        if (!target) break;
+        if (event.style === 'long_shot') {
+          // Laid off to the edge of the box, where the shooter has a sight of goal.
+          this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.5, 0.7), d * 0.75);
+        } else {
+          // Played into space in front of the receiver, where no defender is waiting.
+          this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.85, 0.64), d * 0.8);
+        }
         break;
 
       case 'dribble': {
@@ -266,12 +276,15 @@ export class MatchDirector {
       case 'through_ball': {
         if (actor && this.ball.holder !== actor && actor !== target) this.ball.giveTo(actor);
         if (!target) break;
-        // Into the runner's channel, in behind the last defender.
-        const channel = MathUtils.clamp(this.space.toTeam(A, target.position).nx * 0.55, -0.4, 0.4);
-        const spot = this.space.toWorld(A, channel, 0.82);
-        this.passTo(target, spot, d * 0.8);
-        const defender = this.nearest(otherSide(A), spot, ['DEF', 'MID']);
-        if (defender) this.run(defender, spot.clone().add(this.tmp.set(rand(-1.5, 1.5), 0, 1.5 * this.space.direction(A))), d);
+        if (event.style === 'cross' && actor) this.cross(A, actor, target, d);
+        else if (event.style === 'cutback' && actor) this.cutback(A, actor, target, d);
+        else {
+          // Into the runner's channel, in behind the last defender.
+          const channel = MathUtils.clamp(this.space.toTeam(A, target.position).nx * 0.55, -0.4, 0.4);
+          const spot = this.space.toWorld(A, channel, 0.82);
+          this.passTo(target, spot, d * 0.8);
+          this.trackRunner(A, spot, d);
+        }
         break;
       }
 
@@ -378,12 +391,16 @@ export class MatchDirector {
     }
     if (!this.actionRunning && this.phase === 'planning' && now > this.nextBallDecision) this.playOnTheBall();
 
+    const possession = this.possession();
+    if (possession && this.lastPossession && possession !== this.lastPossession) this.recover(this.lastPossession);
+    this.lastPossession = possession;
+
     this.shapeTargets = this.shape.compute({
       space: this.space,
       players: this.shapePlayers,
       ball: this.ball.destination(this.tmpBall),
       holder: this.ball.holder,
-      possession: this.possession(),
+      possession,
       mentality: { home: this.teams.home?.view.mentality ?? 0, away: this.teams.away?.view.mentality ?? 0 },
     });
     for (const actor of this.actors.values()) {
@@ -440,6 +457,34 @@ export class MatchDirector {
       arrival = d * 0.85;
     }
     if (event.shotResult === 'goal') this.later(arrival, () => this.stadium.netImpact(aim, this.now));
+  }
+
+  /** The wide creator carries it towards the byline and swings it in; the striker attacks the near post. */
+  private cross(A: Side, crosser: PlayerActor, striker: PlayerActor, d: number): void {
+    const wing = Math.sign(this.space.toTeam(A, crosser.position).nx) || sign();
+    this.run(crosser, this.space.toWorld(A, wing * 0.82, 0.86), d * 0.5);
+    const meet = this.space.toWorld(A, wing * 0.12, 0.86);
+    this.run(striker, meet, d * 1.6);
+    this.trackRunner(A, meet, d * 1.6);
+    this.later(d * 0.42, () => {
+      this.ball.kick(meet.clone().setY(1.8), this.now, d * 0.55, 3.2, -wing * 0.8);
+      this.sfx.kick(0.8);
+    });
+  }
+
+  /** The creator beats his man to the byline inside the box and pulls it back to an arriving shooter. */
+  private cutback(A: Side, creator: PlayerActor, shooter: PlayerActor, d: number): void {
+    const wing = Math.sign(this.space.toTeam(A, creator.position).nx) || sign();
+    this.run(creator, this.space.toWorld(A, wing * 0.4, 0.94), d * 0.5);
+    const spot = this.space.toWorld(A, -wing * 0.05, 0.8);
+    this.run(shooter, spot, d * 1.4);
+    this.later(d * 0.45, () => this.passTo(shooter, spot, d * 0.5));
+  }
+
+  /** The nearest defender chases the run, goal-side. */
+  private trackRunner(A: Side, spot: Vector3, durationMs: number): void {
+    const defender = this.nearest(otherSide(A), spot, ['DEF', 'MID']);
+    if (defender) this.run(defender, spot.clone().add(this.tmp.set(rand(-1.2, 1.2), 0, 1.4 * this.space.direction(A))), durationMs);
   }
 
   private save(keeper: PlayerActor | null, d: number, toCorner: boolean, attacking: Side): void {
@@ -582,6 +627,11 @@ export class MatchDirector {
 
   private later(delayMs: number, run: () => void): void {
     this.queue.push({ at: this.now + delayMs, run });
+  }
+
+  /** `side` just lost the ball: everyone caught upfield sprints back into the defensive shape. */
+  private recover(side: Side): void {
+    for (const actor of this.actorsOf(side)) actor.hurry(this.now + RECOVERY_MS);
   }
 
   /** Where the team shape wants this player right now. */
