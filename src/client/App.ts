@@ -71,12 +71,14 @@ export class App {
         if (this.identity.roomCode) this.connection.send({ type: 'joinRoom', code: this.identity.roomCode });
         break;
       case 'state':
+        if (message.view.phase === 'fulltime' && this.store.get().view?.phase !== 'fulltime') this.loadClub();
         if (this.identity.roomCode !== message.view.roomCode) this.identity.roomCode = message.view.roomCode;
         this.store.patch({ view: message.view, clockOffset: message.view.serverNow - Date.now() });
         break;
       case 'roomLeft':
         this.identity.roomCode = null;
         this.store.patch({ view: null });
+        this.loadClub();
         break;
       case 'error':
         this.toaster.show(message.message, 'error');
@@ -119,13 +121,14 @@ export class App {
         }).catch(error => this.store.patch({ authError: String(error.message) })).finally(() => this.store.patch({ authBusy: false }));
       },
       signOut: () => {
+        send({ type: 'leaveRoom' });
         void managerRequest('logout', {}).then(() => {
           this.connection.disconnect();
           this.identity.roomCode = null;
           this.store.patch({ account: null, club: null, clubReady: false, view: null, authError: '' });
         }).catch(error => this.toaster.show(error.message, 'error'));
       },
-      createRoom: opponent => send({ type: 'createRoom', opponent }),
+      createRoom: (opponent, options) => send({ type: 'createRoom', opponent, options }),
       joinRoom: code => send({ type: 'joinRoom', code: code.trim().toUpperCase() }),
       leaveRoom: () => send({ type: 'leaveRoom' }),
       setLineup: lineup => send({ type: 'setLineup', lineup }),

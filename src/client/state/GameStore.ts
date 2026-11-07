@@ -4,6 +4,7 @@ import type { OpponentKind } from '../../shared/protocol';
 import type { ConnectionStatus } from '../net/GameConnection';
 import type { AccountView } from '../../shared/model/account';
 import type { ClubView } from '../../shared/model/club';
+import type { ExhibitionOptions } from '../../shared/model/exhibition';
 
 export interface ClientState {
   club: ClubView | null;
@@ -26,7 +27,7 @@ export interface GameActions {
   createClub(name: string, shortName: string, color: string): void;
   signIn(username: string, password: string, register: boolean): void;
   signOut(): void;
-  createRoom(opponent: OpponentKind): void;
+  createRoom(opponent: OpponentKind, options?: ExhibitionOptions): void;
   joinRoom(code: string): void;
   leaveRoom(): void;
   setLineup(lineup: Lineup): void;

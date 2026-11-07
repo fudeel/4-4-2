@@ -4,6 +4,7 @@ import type { TeamProfile } from './team';
 
 export interface ClubTransaction { id: string; at: number; label: string; amount: number }
 export interface PlayerDevelopment { xp: number; potential: number; sessions: number }
+export interface ClubMatchResult { id: string; at: number; opponent: string; goalsFor: number; goalsAgainst: number; result: 'W' | 'D' | 'L' }
 export interface ClubView {
   id: string;
   ownerId: string;
@@ -21,6 +22,7 @@ export interface ClubView {
   form: ('W' | 'D' | 'L')[];
   development: Record<string, PlayerDevelopment>;
   ledger: ClubTransaction[];
+  history: ClubMatchResult[];
   createdAt: number;
 }
 

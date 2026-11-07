@@ -4,6 +4,7 @@ import type { ClientState } from '../../state/GameStore';
 import { h, render } from '../dom';
 import { money, stadiumCapacity, type ClubView } from '../../../shared/model/club';
 import { ATTRIBUTE_LABELS, overallRating } from '../../../shared/model/player';
+import type { ExhibitionOptions } from '../../../shared/model/exhibition';
 import { TIMING_LABEL } from '../format';
 import type { Screen, ScreenContext } from './Screen';
 
@@ -14,6 +15,9 @@ export class HomeScreen implements Screen {
   private readonly codeInput: HTMLInputElement;
   private readonly clubPanel = h('section', { class: 'club-overview' });
   private lastClub: ClubView | null = null;
+  private readonly pace = h('select', { class: 'input', 'aria-label': 'Exhibition length' }, h('option', { value: 'quick' }, 'Quick · 6 turns'), h('option', { value: 'classic' }, 'Classic · 18 turns'));
+  private readonly difficulty = h('select', { class: 'input', 'aria-label': 'AI difficulty' }, h('option', { value: 'casual' }, 'AI · Casual'), h('option', { value: 'balanced', selected: true }, 'AI · Balanced'), h('option', { value: 'challenging' }, 'AI · Challenging'));
+  private readonly fairPlay = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Fair play' });
 
   constructor(private readonly ctx: ScreenContext) {
     const { actions } = ctx;
@@ -39,6 +43,9 @@ export class HomeScreen implements Screen {
       h('section', { class: 'panel home__panel' },
         h('p', null, `Manager ${ctx.store.get().account?.username ?? ''}`),
         h('button', { class: 'btn btn--ghost', onClick: () => actions.signOut() }, 'Sign out'),
+        h('h2', { class: 'panel__title' }, 'Exhibition match'),
+        this.pace, this.difficulty,
+        h('label', { class: 'fair-play' }, this.fairPlay, ' Fair play · balance team strength for a close game'),
         button('⚔️  Play a friend', 'btn--primary btn--block', () => this.create('human')),
         button('🤖  Practice vs AI', 'btn--ghost btn--block', () => this.create('bot')),
         h('div', { class: 'divider' }, h('span', null, 'or join a room')),
@@ -87,6 +94,7 @@ export class HomeScreen implements Screen {
             h('small', { class: 'muted' }, Object.entries(p.attributes).map(([key, value]) => `${ATTRIBUTE_LABELS[key as keyof typeof ATTRIBUTE_LABELS]} ${value}`).join(' · '))))),
         ),
         h('details', { class: 'panel' }, h('summary', null, 'Club ledger'), ...club.ledger.slice().reverse().map(t => h('div', { class: 'ledger-row' }, h('span', null, t.label), h('strong', null, `${t.amount > 0 ? '+' : ''}${money(t.amount)}`)))),
+        club.history.length ? h('section', { class: 'panel' }, h('h2', { class: 'panel__title' }, 'Recent exhibitions'), ...club.history.slice(-5).reverse().map(m => h('div', { class: 'ledger-row' }, h('span', null, `${m.result} · ${m.opponent}`), h('strong', null, `${m.goalsFor}–${m.goalsAgainst}`)))) : null,
       );
     }
     const offline = state.connection !== 'online';
@@ -98,7 +106,7 @@ export class HomeScreen implements Screen {
   }
 
   private create(opponent: 'human' | 'bot'): void {
-    this.ctx.actions.createRoom(opponent);
+    this.ctx.actions.createRoom(opponent, { pace: this.pace.value as ExhibitionOptions['pace'], fairPlay: this.fairPlay.checked, difficulty: this.difficulty.value as ExhibitionOptions['difficulty'] });
   }
 
   private join(): void {

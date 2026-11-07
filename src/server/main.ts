@@ -21,6 +21,7 @@ const PORT = Number(process.env.GAME_PORT ?? process.env.PORT ?? 3001);
 const DB_PATH = resolve(process.env.DB_PATH ?? 'data/db.json');
 
 const db = createJsonDatabase(DB_PATH);
+const clubs = new ClubService(resolve(process.env.CLUBS_PATH ?? 'data/clubs.json'));
 const scheduler = new SystemScheduler();
 
 function teamsForNewRoom(): { home: TeamSetup; away: TeamSetup } {
@@ -33,19 +34,18 @@ function teamsForNewRoom(): { home: TeamSetup; away: TeamSetup } {
 }
 
 const registry = new RoomRegistry(
-  { db, rules: DEFAULT_RULES, scheduler, createRng: () => new SeededRng(randomInt(2 ** 31)) },
+  { db, rules: DEFAULT_RULES, scheduler, createRng: () => new SeededRng(randomInt(2 ** 31)), onFinished: (id, summary) => clubs.recordMatch(id, summary), onLineup: (ownerId, lineup) => clubs.setLineup(ownerId, lineup) },
   teamsForNewRoom,
 );
 
 const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
-const clubs = new ClubService(resolve(process.env.CLUBS_PATH ?? 'data/clubs.json'));
 const api = new ManagerApi(accounts, clubs);
 const staticHandler = createStaticHandler(resolve('dist/client'));
 const httpServer = createServer((req, res) => {
   if (req.url?.startsWith('/api/')) void api.handle(req, res);
   else staticHandler(req, res);
 });
-new GameServer(registry, scheduler, accounts).attach(httpServer);
+new GameServer(registry, scheduler, accounts, clubs).attach(httpServer);
 setInterval(() => registry.sweep(), 60_000).unref();
 
 httpServer.listen(PORT, () => {

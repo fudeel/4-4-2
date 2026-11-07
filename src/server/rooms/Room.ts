@@ -6,7 +6,11 @@ import { GameError } from '../core/GameError';
 import type { Rng } from '../core/Random';
 import type { Scheduler } from '../core/Scheduler';
 import type { GameDatabase } from '../data/repositories';
-import { Match, type TeamSetup } from '../match/Match';
+import { Match, type MatchSummary, type TeamSetup } from '../match/Match';
+import type { ExhibitionOptions } from '../../shared/model/exhibition';
+import { exhibitionTeam } from './Exhibition';
+import { uniqueId } from '../core/ids';
+import type { Lineup } from '../../shared/model/lineup';
 import { MatchRecorder } from '../match/MatchRecorder';
 import type { ClientSession } from '../net/ClientSession';
 
@@ -15,6 +19,8 @@ export interface RoomDependencies {
   rules: MatchRules;
   scheduler: Scheduler;
   createRng: () => Rng;
+  onFinished?: (id: string, summary: MatchSummary) => void;
+  onLineup?: (ownerId: string, lineup: Lineup) => void;
 }
 
 interface Seat {
@@ -38,6 +44,7 @@ export class Room {
     private readonly opponent: OpponentKind,
     private readonly teams: Record<Side, TeamSetup>,
     private readonly deps: RoomDependencies,
+    readonly options?: ExhibitionOptions,
   ) {
     this.recorder = new MatchRecorder(deps.db.matches);
     this.createdAt = deps.scheduler.now();
@@ -45,10 +52,15 @@ export class Room {
   }
 
   /** Seats a client (or re-attaches a returning one). Returns their side. */
-  join(session: ClientSession): Side {
+  join(session: ClientSession, team?: TeamSetup): Side {
     const existing = this.sideOf(session.clientId);
     const side = existing ?? SIDES.find(s => !this.seats[s]);
     if (!side) throw new GameError('room_full', 'This room is already full.');
+    if (!existing && this.match.phase !== 'lobby') throw new GameError('invalid_phase', 'This exhibition has already started.');
+    if (!existing && team && this.teams[side].team.id !== team.team.id) {
+      this.teams[side] = exhibitionTeam(team, this.options?.fairPlay ?? false);
+      this.startMatch();
+    }
 
     const name = this.uniqueName(session.name, side);
     this.seats[side] = { clientId: session.clientId, name, session, disconnectedAt: null };
@@ -87,7 +99,12 @@ export class Room {
     if (!side) throw new GameError('not_in_room', 'You are not part of this room.');
     switch (message.type) {
       case 'setLineup':
-        return this.match.submitLineup(side, message.lineup);
+        this.match.submitLineup(side, message.lineup);
+        if (this.match.phase === 'lobby') {
+          this.teams[side].lineup = structuredClone(message.lineup);
+          this.deps.onLineup?.(clientId, message.lineup);
+        }
+        return;
       case 'setReady':
         return this.match.setReady(side, message.ready);
       case 'playCard':
@@ -101,6 +118,13 @@ export class Room {
         throw new GameError('bad_request', `Unsupported message: ${message.type}`);
     }
   }
+
+  hasConnectedManager(clientId: string): boolean {
+    const side = this.sideOf(clientId);
+    return !!side && !!this.seats[side]?.session && this.match.phase !== 'fulltime';
+  }
+
+  contains(clientId: string): boolean { return this.sideOf(clientId) !== undefined; }
 
   /** True when no human has been connected for `idleMs`. */
   isAbandoned(now: number, idleMs: number): boolean {
@@ -123,6 +147,8 @@ export class Room {
     );
     this.match.onChange(() => this.queueBroadcast());
     this.match.onFinished(summary => this.recorder.record(summary));
+    const matchId = uniqueId('exhibition');
+    this.match.onFinished(summary => this.deps.onFinished?.(matchId, summary));
 
     for (const side of SIDES) {
       const seat = this.seats[side];
@@ -159,7 +185,7 @@ export class Room {
       this.broadcastQueued = false;
       for (const side of SIDES) {
         const session = this.seats[side]?.session;
-        if (session) session.send({ type: 'state', view: this.match.view(side) });
+        if (session) session.send({ type: 'state', view: { ...this.match.view(side), exhibition: this.options } });
       }
     });
   }

@@ -7,6 +7,8 @@ import type { RoomRegistry } from '../rooms/RoomRegistry';
 import { ClientSession } from './ClientSession';
 import { parseClientMessage } from './MessageParser';
 import type { AccountService } from '../accounts/AccountService';
+import type { ClubService } from '../clubs/ClubService';
+import type { TeamSetup } from '../match/Match';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -20,6 +22,7 @@ export class GameServer {
     private readonly registry: RoomRegistry,
     private readonly clock: Clock,
     private readonly accounts?: AccountService,
+    private readonly clubs?: ClubService,
   ) {}
 
   attach(httpServer: Server): void {
@@ -90,16 +93,21 @@ export class GameServer {
   private route(session: ClientSession, message: Exclude<ClientMessage, { type: 'hello' }>): void {
     switch (message.type) {
       case 'createRoom': {
+        const active = this.registry.activeRoom(session.clientId);
+        if (active && active.code !== session.roomCode) throw new GameError('invalid_phase', 'Your club is already in another exhibition. Rejoin that room first.');
+        const club = this.clubTeam(session.clientId);
         this.leaveCurrentRoom(session);
-        const room = this.registry.create(message.opponent);
+        const room = this.registry.create(message.opponent, club, message.options);
         room.join(session);
         session.roomCode = room.code;
         return;
       }
       case 'joinRoom': {
         const room = this.registry.find(message.code);
+        const active = this.registry.activeRoom(session.clientId);
+        if (active && active.code !== room.code) throw new GameError('invalid_phase', 'Leave your current exhibition before joining another.');
         if (session.roomCode && session.roomCode !== room.code) this.leaveCurrentRoom(session);
-        room.join(session);
+        room.join(session, this.clubTeam(session.clientId));
         session.roomCode = room.code;
         return;
       }
@@ -110,6 +118,13 @@ export class GameServer {
         if (!session.roomCode) throw new GameError('not_in_room', 'Join a room first.');
         this.registry.find(session.roomCode).handle(session.clientId, message);
     }
+  }
+
+  private clubTeam(ownerId: string): TeamSetup | undefined {
+    if (!this.clubs) return undefined;
+    const club = this.clubs.findOwner(ownerId);
+    if (!club) throw new GameError('invalid_lineup', 'Create your club before joining an exhibition.');
+    return { team: club.team, squad: club.squad, lineup: club.lineup };
   }
 
   private leaveCurrentRoom(session: ClientSession): void {

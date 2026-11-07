@@ -2,6 +2,7 @@ import type { CardId, CardInstance } from './cards';
 import type { Lineup } from './lineup';
 import type { PlayerProfile } from './player';
 import type { TeamProfile } from './team';
+import type { ExhibitionOptions } from './exhibition';
 
 export type Side = 'home' | 'away';
 export const SIDES: readonly Side[] = ['home', 'away'];
@@ -182,6 +183,7 @@ export interface MatchResultView {
 }
 
 export interface MatchView {
+  exhibition?: ExhibitionOptions;
   roomCode: string;
   you: Side;
   phase: MatchPhase;

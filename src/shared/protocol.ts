@@ -1,11 +1,12 @@
 import type { Lineup } from './model/lineup';
 import type { MatchView } from './model/match';
+import type { ExhibitionOptions } from './model/exhibition';
 
 export type OpponentKind = 'human' | 'bot';
 
 export type ClientMessage =
   | { type: 'hello'; clientId: string; name: string }
-  | { type: 'createRoom'; opponent: OpponentKind }
+  | { type: 'createRoom'; opponent: OpponentKind; options?: ExhibitionOptions }
   | { type: 'joinRoom'; code: string }
   | { type: 'leaveRoom' }
   | { type: 'setLineup'; lineup: Lineup }
