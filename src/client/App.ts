@@ -105,7 +105,18 @@ export class App {
 
   private createActions(): GameActions {
     const send = this.connection.send.bind(this.connection);
+    const changeClub = (path: string, data: unknown) => {
+      if (this.store.get().clubBusy) return;
+      const accountId = this.store.get().account?.id;
+      this.store.patch({ clubBusy: true, clubError: '' });
+      void managerRequest<{ club: ClubView }>(`club/${path}`, data).then(({ club }) => {
+        if (this.store.get().account?.id === accountId) { this.store.patch({ club }); this.toaster.show('Club updated.', 'success'); }
+      }).catch(error => { this.store.patch({ clubError: error.message }); this.toaster.show(error.message, 'error'); }).finally(() => this.store.patch({ clubBusy: false }));
+    };
     return {
+      upgradeFacility: facility => changeClub('upgrade', { facility }),
+      trainPlayer: (playerId, attribute) => changeClub('train', { playerId, attribute }),
+      promoteProspect: playerId => changeClub('promote', { playerId }),
       createClub: (name, shortName, color) => {
         if (this.store.get().clubBusy) return;
         this.store.patch({ clubBusy: true, clubError: '' });

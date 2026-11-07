@@ -39,7 +39,7 @@ const registry = new RoomRegistry(
 );
 
 const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
-const api = new ManagerApi(accounts, clubs);
+const api = new ManagerApi(accounts, clubs, ownerId => registry.isClubBusy(ownerId));
 const staticHandler = createStaticHandler(resolve('dist/client'));
 const httpServer = createServer((req, res) => {
   if (req.url?.startsWith('/api/')) void api.handle(req, res);

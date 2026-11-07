@@ -5,6 +5,7 @@ import { h, render } from '../dom';
 import { money, stadiumCapacity, type ClubView } from '../../../shared/model/club';
 import { ATTRIBUTE_LABELS, overallRating } from '../../../shared/model/player';
 import type { ExhibitionOptions } from '../../../shared/model/exhibition';
+import { ProgressionPanel } from '../components/ProgressionPanel';
 import { TIMING_LABEL } from '../format';
 import type { Screen, ScreenContext } from './Screen';
 
@@ -15,12 +16,14 @@ export class HomeScreen implements Screen {
   private readonly codeInput: HTMLInputElement;
   private readonly clubPanel = h('section', { class: 'club-overview' });
   private lastClub: ClubView | null = null;
+  private readonly progression: ProgressionPanel;
   private readonly pace = h('select', { class: 'input', 'aria-label': 'Exhibition length' }, h('option', { value: 'quick' }, 'Quick · 6 turns'), h('option', { value: 'classic' }, 'Classic · 18 turns'));
   private readonly difficulty = h('select', { class: 'input', 'aria-label': 'AI difficulty' }, h('option', { value: 'casual' }, 'AI · Casual'), h('option', { value: 'balanced', selected: true }, 'AI · Balanced'), h('option', { value: 'challenging' }, 'AI · Challenging'));
   private readonly fairPlay = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Fair play' });
 
   constructor(private readonly ctx: ScreenContext) {
     const { actions } = ctx;
+    this.progression = new ProgressionPanel(ctx);
     this.codeInput = h('input', {
       class: 'input input--code', maxlength: 4, placeholder: 'CODE', 'aria-label': 'Room code', autocapitalize: 'characters',
       onInput: () => { this.codeInput.value = this.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); },
@@ -73,11 +76,13 @@ export class HomeScreen implements Screen {
           }),
         ),
       ),
+      this.progression.element,
       h('footer', { class: 'home__footer' }, 'Friends join with their own accounts. Use a different browser or a private window for a second manager on this computer.'),
     );
   }
 
   update(state: ClientState): void {
+    this.progression.update(state);
     if (state.club && state.club !== this.lastClub) {
       this.lastClub = state.club;
       const club = state.club;

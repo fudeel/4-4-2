@@ -5,6 +5,8 @@ import type { ConnectionStatus } from '../net/GameConnection';
 import type { AccountView } from '../../shared/model/account';
 import type { ClubView } from '../../shared/model/club';
 import type { ExhibitionOptions } from '../../shared/model/exhibition';
+import type { AttributeKey } from '../../shared/model/player';
+import type { Facility } from '../../shared/model/progression';
 
 export interface ClientState {
   club: ClubView | null;
@@ -24,6 +26,9 @@ export interface ClientState {
 
 /** Everything the UI can ask for. Screens depend on this interface, not on the network (DIP). */
 export interface GameActions {
+  upgradeFacility(facility: Facility): void;
+  trainPlayer(playerId: string, attribute: AttributeKey): void;
+  promoteProspect(playerId: string): void;
   createClub(name: string, shortName: string, color: string): void;
   signIn(username: string, password: string, register: boolean): void;
   signOut(): void;

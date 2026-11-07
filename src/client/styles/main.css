@@ -112,6 +112,15 @@ h1, h2, h3, p { margin: 0; }
 .squad-list { display: grid; gap: 10px; margin-top: 12px; }
 .squad-player { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 5px; font-size: 13px; }
 .ledger-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.fair-play { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.fair-play input { margin-top: 3px; accent-color: var(--accent); }
+.upgrade-grid, .training-list { display: grid; gap: 12px; }
+.training-list { margin-top: 14px; }
+.upgrade-card, .training-card { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-2); }
+.upgrade-card h3, .training-card h3 { font-size: 15px; }
+.upgrade-card p, .training-card p { font-size: 13px; }
+.progression summary { padding: 12px 0; cursor: pointer; font-weight: 700; }
+.recommendation { color: var(--accent); }
 .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .join-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
