@@ -9,15 +9,10 @@ import type { Screen, ScreenContext } from './Screen';
 export class HomeScreen implements Screen {
   readonly element: HTMLElement;
   private readonly buttons: HTMLButtonElement[] = [];
-  private readonly nameInput: HTMLInputElement;
   private readonly codeInput: HTMLInputElement;
 
   constructor(private readonly ctx: ScreenContext) {
     const { actions } = ctx;
-    this.nameInput = h('input', {
-      class: 'input', maxlength: 20, value: ctx.store.get().playerName, 'aria-label': 'Manager name', autocomplete: 'nickname',
-      onChange: () => actions.setName(this.nameInput.value),
-    });
     this.codeInput = h('input', {
       class: 'input input--code', maxlength: 4, placeholder: 'CODE', 'aria-label': 'Room code', autocapitalize: 'characters',
       onInput: () => { this.codeInput.value = this.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); },
@@ -37,7 +32,8 @@ export class HomeScreen implements Screen {
         h('p', { class: 'home__tagline' }, 'Turn-based 6-a-side football. Pick your shape, play your cards, roll the dice.'),
       ),
       h('section', { class: 'panel home__panel' },
-        h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Manager name'), this.nameInput),
+        h('p', null, `Manager ${ctx.store.get().account?.username ?? ''}`),
+        h('button', { class: 'btn btn--ghost', onClick: () => actions.signOut() }, 'Sign out'),
         button('⚔️  Play a friend', 'btn--primary btn--block', () => this.create('human')),
         button('🤖  Practice vs AI', 'btn--ghost btn--block', () => this.create('bot')),
         h('div', { class: 'divider' }, h('span', null, 'or join a room')),
@@ -65,7 +61,7 @@ export class HomeScreen implements Screen {
           }),
         ),
       ),
-      h('footer', { class: 'home__footer' }, 'Tip: open this page in a second browser tab to play against yourself.'),
+      h('footer', { class: 'home__footer' }, 'Friends join with their own accounts. Use a different browser or a private window for a second manager on this computer.'),
     );
   }
 
@@ -79,7 +75,6 @@ export class HomeScreen implements Screen {
   }
 
   private create(opponent: 'human' | 'bot'): void {
-    this.ctx.actions.setName(this.nameInput.value);
     this.ctx.actions.createRoom(opponent);
   }
 
@@ -89,7 +84,6 @@ export class HomeScreen implements Screen {
       this.ctx.toaster.show('Enter the 4-character room code.', 'error');
       return;
     }
-    this.ctx.actions.setName(this.nameInput.value);
     this.ctx.actions.joinRoom(code);
   }
 }

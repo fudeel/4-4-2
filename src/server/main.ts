@@ -11,6 +11,8 @@ import type { TeamSetup } from './match/Match';
 import { GameServer } from './net/GameServer';
 import { createStaticHandler } from './net/StaticFiles';
 import { RoomRegistry } from './rooms/RoomRegistry';
+import { AccountService } from './accounts/AccountService';
+import { ManagerApi } from './net/ManagerApi';
 
 /* Composition root: the only place that knows concrete implementations. */
 
@@ -34,8 +36,14 @@ const registry = new RoomRegistry(
   teamsForNewRoom,
 );
 
-const httpServer = createServer(createStaticHandler(resolve('dist/client')));
-new GameServer(registry, scheduler).attach(httpServer);
+const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
+const api = new ManagerApi(accounts);
+const staticHandler = createStaticHandler(resolve('dist/client'));
+const httpServer = createServer((req, res) => {
+  if (req.url?.startsWith('/api/')) void api.handle(req, res);
+  else staticHandler(req, res);
+});
+new GameServer(registry, scheduler, accounts).attach(httpServer);
 setInterval(() => registry.sweep(), 60_000).unref();
 
 httpServer.listen(PORT, () => {

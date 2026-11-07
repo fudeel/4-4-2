@@ -4,6 +4,7 @@ const SERVER_PORT = Number(process.env.GAME_PORT ?? 3001);
 
 const wsProxy = {
   '/ws': { target: `ws://localhost:${SERVER_PORT}`, ws: true },
+  '/api': { target: `http://localhost:${SERVER_PORT}` },
 };
 
 export default defineConfig({

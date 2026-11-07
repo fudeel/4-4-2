@@ -9,8 +9,11 @@ import { HomeScreen } from './ui/screens/HomeScreen';
 import { LobbyScreen } from './ui/screens/LobbyScreen';
 import { MatchScreen } from './ui/screens/MatchScreen';
 import type { Screen, ScreenContext } from './ui/screens/Screen';
+import { AccountScreen } from './ui/screens/AccountScreen';
+import { managerRequest } from './net/ManagerClient';
+import type { AccountView } from '../shared/model/account';
 
-type ScreenKind = 'home' | 'lobby' | 'match';
+type ScreenKind = 'account' | 'home' | 'lobby' | 'match';
 
 /** Wires network ↔ store ↔ screens and switches screens as the match progresses. */
 export class App {
@@ -34,11 +37,21 @@ export class App {
   start(): void {
     this.root.append(this.host, this.toaster.element, this.connectionBadge);
     this.connection.onOpen(() => this.connection.send({ type: 'hello', clientId: this.identity.clientId, name: this.identity.name }));
-    this.connection.onStatus(connection => this.store.patch({ connection }));
+    this.connection.onStatus(connection => {
+      this.store.patch({ connection });
+      if (connection === 'offline' && this.store.get().account) {
+        void managerRequest<{ account: AccountView | null }>('session').then(({ account }) => {
+          if (!account) { this.connection.disconnect(); this.store.patch({ account: null, view: null, authError: 'Your session ended. Please sign in again.' }); }
+        }).catch(() => {});
+      }
+    });
     this.connection.onMessage(message => this.handle(message));
     this.store.subscribe(state => this.render(state));
     this.render(this.store.get());
-    this.connection.connect();
+    void managerRequest<{ account: AccountView | null }>('session').then(({ account }) => {
+      this.store.patch({ account, authReady: true, playerName: account?.username ?? '' });
+      if (account) this.connection.connect();
+    }).catch(() => this.store.patch({ authReady: true, authError: 'Cannot reach the game server. Reload to try again.' }));
   }
 
   private handle(message: ServerMessage): void {
@@ -66,26 +79,36 @@ export class App {
   }
 
   private render(state: ClientState): void {
-    const kind: ScreenKind = !state.view ? 'home' : state.view.phase === 'lobby' ? 'lobby' : 'match';
+    const kind: ScreenKind = !state.account ? 'account' : !state.view ? 'home' : state.view.phase === 'lobby' ? 'lobby' : 'match';
     if (kind !== this.screenKind) {
       this.screen?.destroy();
-      this.screen = kind === 'home' ? new HomeScreen(this.context) : kind === 'lobby' ? new LobbyScreen(this.context) : new MatchScreen(this.context);
+      this.screen = kind === 'account' ? new AccountScreen(this.context) : kind === 'home' ? new HomeScreen(this.context) : kind === 'lobby' ? new LobbyScreen(this.context) : new MatchScreen(this.context);
       this.screenKind = kind;
       this.host.replaceChildren(this.screen.element);
     }
     this.screen?.update(state);
 
-    this.connectionBadge.className = `conn-badge conn-badge--${state.connection}`;
+    this.connectionBadge.className = `conn-badge conn-badge--${state.account ? state.connection : 'online'}`;
     setText(this.connectionBadge, state.connection === 'online' ? '' : state.connection === 'connecting' ? 'Connecting…' : 'Offline — reconnecting…');
   }
 
   private createActions(): GameActions {
     const send = this.connection.send.bind(this.connection);
     return {
-      setName: name => {
-        this.identity.name = name;
-        this.store.patch({ playerName: this.identity.name });
-        send({ type: 'hello', clientId: this.identity.clientId, name: this.identity.name });
+      signIn: (username, password, register) => {
+        if (this.store.get().authBusy) return;
+        this.store.patch({ authBusy: true, authError: '' });
+        void managerRequest<{ account: AccountView }>(register ? 'register' : 'login', { username, password }).then(({ account }) => {
+          this.store.patch({ account, playerName: account.username });
+          this.connection.connect();
+        }).catch(error => this.store.patch({ authError: String(error.message) })).finally(() => this.store.patch({ authBusy: false }));
+      },
+      signOut: () => {
+        void managerRequest('logout', {}).then(() => {
+          this.connection.disconnect();
+          this.identity.roomCode = null;
+          this.store.patch({ account: null, view: null, authError: '' });
+        }).catch(error => this.toaster.show(error.message, 'error'));
       },
       createRoom: opponent => send({ type: 'createRoom', opponent }),
       joinRoom: code => send({ type: 'joinRoom', code: code.trim().toUpperCase() }),

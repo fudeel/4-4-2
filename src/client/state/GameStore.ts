@@ -2,8 +2,13 @@ import type { Lineup } from '../../shared/model/lineup';
 import type { MatchView } from '../../shared/model/match';
 import type { OpponentKind } from '../../shared/protocol';
 import type { ConnectionStatus } from '../net/GameConnection';
+import type { AccountView } from '../../shared/model/account';
 
 export interface ClientState {
+  account: AccountView | null;
+  authReady: boolean;
+  authBusy: boolean;
+  authError: string;
   connection: ConnectionStatus;
   view: MatchView | null;
   /** serverTime − Date.now(), so countdowns agree across devices. */
@@ -13,7 +18,8 @@ export interface ClientState {
 
 /** Everything the UI can ask for. Screens depend on this interface, not on the network (DIP). */
 export interface GameActions {
-  setName(name: string): void;
+  signIn(username: string, password: string, register: boolean): void;
+  signOut(): void;
   createRoom(opponent: OpponentKind): void;
   joinRoom(code: string): void;
   leaveRoom(): void;

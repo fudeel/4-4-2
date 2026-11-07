@@ -95,6 +95,9 @@ h1, h2, h3, p { margin: 0; }
 .logo i { font-style: normal; color: var(--muted); font-size: 56px; }
 .home__tagline { color: var(--muted); margin-top: 8px; line-height: 1.4; }
 .home__panel { display: grid; gap: 12px; }
+.account-screen h1 { margin: 20px 0 10px; font-size: clamp(24px, 5vw, 36px); }
+.account-screen small { color: var(--muted); line-height: 1.5; }
+.account-status { min-height: 24px; color: var(--warn); font-size: 14px; }
 .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .join-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
