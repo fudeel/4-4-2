@@ -103,8 +103,9 @@ src/
     state/           Observable store + GameActions interface
     ui/              Screens (home, lobby, match), lineup editor, HUD widgets, sheets
     presentation/    ActionPlayback: replays an action on the server's timeline
-    render/          Three.js: pitch & stadium, player/ball actors, camera rig, MatchDirector choreography
+    render/          Three.js: player/ball actors, camera rig, MatchDirector choreography
       tactics/       TeamShape (where every player stands off the ball) and BallPlanner (pass / carry / hold)
+      stadium/       Stadium (sky, golden-hour light + shadows, grass, stands, props), Goal (animated net), Crowd (GPU-animated fans)
 ```
 
 Design notes:
@@ -114,6 +115,7 @@ Design notes:
 - **Dependency inversion.** Game code depends on `GameDatabase`/repository interfaces, `Rng`, and `Scheduler`. Swapping the JSON file for a real database, or running matches in fast-forward for tests and balancing, needs no changes to the game logic.
 - **Deterministic and testable.** With a seeded RNG and the `ManualScheduler`, a full match is reproducible; `npm run simulate` uses this to tune balance (currently ≈2.6 goals per match, ≈6% goalless).
 - **Players think, the server decides.** The server rolls the dice; the client only decides *how it looks*. Off the ball, `TeamShape` positions everyone from the ball and possession — width, support angles and forwards on the last defender's shoulder in possession; a narrow, ball-side block, goal-side of the ball, with one player pressing, out of it — and nothing moves at random. On the ball, `BallPlanner` scores each pass (receiver free? lane safe? forward? comfortable length?) or carries the ball into space. Players jog into position and sprint only when it matters.
+- **Stylised low-poly look.** Players, ball and props are flat-shaded and vertex-coloured, so a body segment is one mesh and every player shares one material; the ball's pentagons come from subdividing an icosahedron. One low golden-hour sun casts real (PCF soft) shadows, ACES tone mapping and a sky dome set the mood, the nets bulge when a goal goes in and the scoring side's fans jump — all fan motion runs in the vertex shader (two draw calls for ~2,000 fans). Phones get a smaller shadow map.
 - **No spoilers.** Commentary lines and the score are revealed in step with the 3D animation.
 
 The local database is `data/db.json` (created and seeded on first run). It stores teams, players, finished matches and per-player career stats. Delete it to reset.

@@ -6,6 +6,7 @@ import { BallActor } from './BallActor';
 import type { CameraRig } from './CameraRig';
 import { PITCH, PitchSpace } from './PitchSpace';
 import { PlayerActor } from './PlayerActor';
+import type { StadiumEffects } from './stadium/Stadium';
 import { BallPlanner } from './tactics/BallPlanner';
 import { TeamShape, type ShapePlayer } from './tactics/TeamShape';
 
@@ -56,6 +57,7 @@ export class MatchDirector {
     private readonly scene: Scene,
     private readonly camera: CameraRig,
     private readonly sfx: Sfx,
+    private readonly stadium: StadiumEffects,
   ) {
     scene.add(this.ball.group, this.ball.shadowMesh);
   }
@@ -66,6 +68,7 @@ export class MatchDirector {
     this.now = now;
     this.space.setViewer(view.you);
     this.phase = view.phase;
+    this.stadium.setTeamColors(view.teams.home.team.primaryColor, view.teams.away.team.primaryColor);
     const wanted = new Set<string>();
 
     for (const side of ['home', 'away'] as const) {
@@ -85,6 +88,7 @@ export class MatchDirector {
           shirt: isKeeper ? team.team.goalkeeperColor : team.team.primaryColor,
           shorts: isKeeper ? '#1b1b1b' : team.team.secondaryColor,
           socks: isKeeper ? team.team.goalkeeperColor : team.team.primaryColor,
+          gloves: isKeeper ? '#f4f4f4' : undefined,
         }, team.team.primaryColor);
         const spot = this.shape.restingSpot(formation.slots[slot]!);
         actor.teleport(this.space.toWorld(side, spot.nx, spot.ny, 0, this.tmp));
@@ -318,6 +322,7 @@ export class MatchDirector {
 
       case 'miss':
         this.sfx.roar(1.2, 0.35);
+        this.stadium.cheer(null, 0.35);
         break;
 
       case 'goal':
@@ -423,14 +428,18 @@ export class MatchDirector {
       this.sfx.kick(1);
     };
 
+    let arrival: number;
     if (event.kind === 'header' && shooter) {
       const head = shooter.position.clone().setY(2.4);
       this.ball.kick(head, this.now, d * 0.45, 3);
       this.later(d * 0.45, () => strike(d * 0.5));
+      arrival = d * 0.95;
     } else {
       if (shooter && this.ball.holder !== shooter && !this.ball.inFlight) this.ball.giveTo(shooter);
       strike(d * 0.85);
+      arrival = d * 0.85;
     }
+    if (event.shotResult === 'goal') this.later(arrival, () => this.stadium.netImpact(aim, this.now));
   }
 
   private save(keeper: PlayerActor | null, d: number, toCorner: boolean, attacking: Side): void {
@@ -448,11 +457,13 @@ export class MatchDirector {
         this.ball.giveTo(keeper);
       }
       this.sfx.roar(1.4, 0.5);
+      this.stadium.cheer(null, 0.45);
     });
   }
 
   private celebrate(side: Side, scorer: PlayerActor | null, d: number): void {
     this.sfx.roar(3.2, 1);
+    this.stadium.cheer(side, 1);
     this.later(250, () => this.sfx.whistle(1));
     this.camera.shake(this.now, 700, 1.4);
     this.camera.setZoom(0.85);

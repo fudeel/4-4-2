@@ -1,8 +1,37 @@
-import { CircleGeometry, Group, Mesh, MeshBasicMaterial, MeshLambertMaterial, SphereGeometry, Vector3 } from 'three';
+import { CircleGeometry, Float32BufferAttribute, Group, IcosahedronGeometry, Mesh, MeshBasicMaterial, MeshStandardMaterial, Vector3, type BufferGeometry } from 'three';
 import type { PlayerActor } from './PlayerActor';
-import { createBallTexture, createShadowTexture } from './textures';
+import { createShadowTexture } from './textures';
 
 const RADIUS = 0.3;
+
+/**
+ * A low-poly football. Subdividing an icosahedron's edges in three leaves a fan of five small
+ * triangles around each of its 12 corners — exactly the pentagons of a truncated icosahedron,
+ * the classic ball. Those fans are painted black, everything else white.
+ */
+function ballGeometry(): BufferGeometry {
+  const geometry = new IcosahedronGeometry(RADIUS, 2);
+  const corners: Vector3[] = [];
+  const base = new IcosahedronGeometry(1, 0).getAttribute('position');
+  for (let i = 0; i < base.count; i++) {
+    const v = new Vector3().fromBufferAttribute(base, i).normalize();
+    if (!corners.some(c => c.distanceToSquared(v) < 1e-6)) corners.push(v);
+  }
+  const position = geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  const v = new Vector3();
+  for (let tri = 0; tri < position.count; tri += 3) {
+    let touchesCorner = false;
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(position, tri + k).normalize();
+      if (corners.some(c => c.distanceToSquared(v) < 1e-6)) touchesCorner = true;
+    }
+    const shade = touchesCorner ? 0.012 : 0.9;
+    for (let k = 0; k < 3; k++) colors.set([shade, shade, shade], (tri + k) * 3);
+  }
+  geometry.setAttribute('color', new Float32BufferAttribute(colors, 3));
+  return geometry;
+}
 
 interface Flight {
   from: Vector3;
@@ -25,8 +54,9 @@ export class BallActor {
   private readonly tmp = new Vector3();
 
   constructor() {
-    this.mesh = new Mesh(new SphereGeometry(RADIUS, 16, 12), new MeshLambertMaterial({ map: createBallTexture() }));
-    this.shadow = new Mesh(new CircleGeometry(0.4, 12), new MeshBasicMaterial({ map: createShadowTexture(), transparent: true, depthWrite: false }));
+    this.mesh = new Mesh(ballGeometry(), new MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.45 }));
+    this.mesh.castShadow = true;
+    this.shadow = new Mesh(new CircleGeometry(0.4, 12), new MeshBasicMaterial({ map: createShadowTexture(), transparent: true, opacity: 0.6, depthWrite: false }));
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.y = 0.012;
     this.group.add(this.mesh);
