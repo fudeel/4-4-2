@@ -125,6 +125,15 @@ export class Match {
     this.emitChange();
   }
 
+  /** Moves the Defence ↔ Attack slider. Allowed at any point of the match; it applies from the next action. */
+  setMentality(side: Side, value: number): void {
+    if (this.phase === 'fulltime') throw new GameError('invalid_phase', 'The match is over.');
+    const team = this.state.team(side);
+    const before = team.mentality;
+    team.setMentality(value);
+    if (team.mentality !== before) this.emitChange();
+  }
+
   /** Plays a card from hand, or skips the turn when `cardInstanceId` is null. */
   playCard(side: Side, cardInstanceId: string | null): void {
     if (this.phase !== 'planning') throw new GameError('invalid_phase', 'You can only play cards while a turn is being planned.');

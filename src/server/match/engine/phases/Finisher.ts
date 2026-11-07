@@ -35,7 +35,8 @@ export class Finisher {
     const shotScore = ctx.ratings.playerScore(shooterFp, ctx.attackSide, spec.skill, spec.stage);
     const keeperScore = keeperFp ? ctx.ratings.playerScore(keeperFp, ctx.defenseSide, SKILLS.goalkeeping, spec.stage) : 15;
 
-    const blockerFp = spec.baseBlockChance > 0 ? ctx.pick(ctx.defense, { DEF: 1, MID: 0.5, FWD: 0.1 }, SKILLS.blocking) : null;
+    // The shooter's marker (or whoever covers that zone) throws himself in the way.
+    const blockerFp = spec.baseBlockChance > 0 ? ctx.opponentOf(shooter, SKILLS.blocking, ['DEF', 'MID']) : null;
     const blockScore = blockerFp ? ctx.ratings.playerScore(blockerFp, ctx.defenseSide, SKILLS.blocking, 'block') : 0;
     const blockChance = blockerFp ? clamp(spec.baseBlockChance + (blockScore - 60) / 300, 0.03, 0.3) : 0;
     const accuracy = spec.accuracy ?? clamp(spec.accuracyBase + shotScore / 300 + quality * 0.2, 0.2, 0.92);

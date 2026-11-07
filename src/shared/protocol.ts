@@ -12,6 +12,8 @@ export type ClientMessage =
   | { type: 'setReady'; ready: boolean }
   /** `null` = skip this turn. */
   | { type: 'playCard'; cardInstanceId: string | null }
+  /** Defence ↔ Attack slider, −100 … +100. */
+  | { type: 'setMentality'; value: number }
   | { type: 'requestRematch' };
 
 export type ServerMessage =

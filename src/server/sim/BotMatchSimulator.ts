@@ -1,4 +1,4 @@
-import { SIDES } from '../../shared/model/match';
+import { SIDES, type ActionReport, type Side } from '../../shared/model/match';
 import { DEFAULT_RULES, type MatchRules } from '../../shared/rules';
 import { BotManager } from '../ai/BotManager';
 import { SeededRng } from '../core/Random';
@@ -6,8 +6,15 @@ import { ManualScheduler } from '../core/Scheduler';
 import { SEED_PLAYERS, SEED_TEAMS } from '../data/seed';
 import { Match, type MatchSummary } from '../match/Match';
 
+export interface SimulationOptions {
+  /** Fixes a side's mentality slider instead of letting its bot manage it. */
+  mentality?: Partial<Record<Side, number>>;
+  /** Called once for every action played (for analysis and tests). */
+  onAction?: (report: ActionReport) => void;
+}
+
 /** Plays a complete bot-vs-bot match in fast-forward. Used for balancing and tests. */
-export function simulateBotMatch(seed: number, rules: MatchRules = DEFAULT_RULES, swapTeams = false): MatchSummary {
+export function simulateBotMatch(seed: number, rules: MatchRules = DEFAULT_RULES, swapTeams = false, options: SimulationOptions = {}): MatchSummary {
   const scheduler = new ManualScheduler();
   const rng = new SeededRng(seed);
   const [home, away] = swapTeams ? [SEED_TEAMS[1], SEED_TEAMS[0]] : SEED_TEAMS;
@@ -22,7 +29,15 @@ export function simulateBotMatch(seed: number, rules: MatchRules = DEFAULT_RULES
 
   let summary: MatchSummary | null = null;
   match.onFinished(s => { summary = s; });
-  const bots = SIDES.map(side => new BotManager(match, side, scheduler, new SeededRng(seed * 31 + side.length)));
+  let lastActionId = -1;
+  match.onChange(() => {
+    const action = match.state.lastAction;
+    if (!action || action.id === lastActionId) return;
+    lastActionId = action.id;
+    options.onAction?.(action);
+  });
+  const bots = SIDES.map(side =>
+    new BotManager(match, side, scheduler, new SeededRng(seed * 31 + side.length), { fixedMentality: options.mentality?.[side] }));
   for (const side of SIDES) {
     match.assignManager(side, { clientId: `bot-${side}`, name: `Bot ${side}`, isBot: true, connected: true });
   }

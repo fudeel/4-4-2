@@ -53,6 +53,8 @@ export interface TeamView {
   ready: boolean;
   /** True once the manager has locked in a card (or a skip) this turn. */
   locked: boolean;
+  /** Defence ↔ Attack slider, −100 … +100 (see `shared/model/tactics`). Visible to both managers, like a team's shape. */
+  mentality: number;
   handCount: number;
   subsUsed: number;
   stats: TeamMatchStats;
@@ -114,6 +116,9 @@ export type MatchEventKind =
 
 export type ShotResult = 'goal' | 'saved' | 'missed' | 'blocked';
 
+/** How a chance was made. The engine picks the option that suits the players; the client choreographs each one. */
+export type ChanceStyle = 'through' | 'cross' | 'cutback' | 'solo' | 'long_shot';
+
 export interface MatchEvent {
   kind: MatchEventKind;
   /** The side performing the event. */
@@ -125,6 +130,8 @@ export interface MatchEvent {
   roll?: DiceRoll;
   booking?: { playerId: string; card: 'yellow' | 'red' };
   shotResult?: ShotResult;
+  /** Set on the event that creates a chance. */
+  style?: ChanceStyle;
 }
 
 export type ActionOutcome =

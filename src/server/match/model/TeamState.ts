@@ -2,6 +2,7 @@ import { getFormation } from '../../../shared/model/formation';
 import { LineupValidator, type Lineup, type LineupRules } from '../../../shared/model/lineup';
 import type { ManagerView, Side, TeamMatchStats } from '../../../shared/model/match';
 import type { PlayerProfile, Position, TraitId } from '../../../shared/model/player';
+import { MENTALITY, normalizeMentality } from '../../../shared/model/tactics';
 import type { TeamProfile } from '../../../shared/model/team';
 import type { MatchRules } from '../../../shared/rules';
 import { GameError } from '../../core/GameError';
@@ -40,6 +41,10 @@ export class TeamState {
   ready = false;
   subsUsed = 0;
   selection: CardSelection = { locked: false, cardInstanceId: null };
+  /** −100 (all behind the ball) … +100 (all forward). Applied from the next action on. */
+  mentality: number = MENTALITY.initial;
+  /** Mentality used in the last resolved action, to announce changes in the commentary. */
+  appliedMentality: number = MENTALITY.initial;
   readonly stats: TeamMatchStats = emptyStats();
   /** Players on the pitch when half-time started (null outside the break). */
   private halfTimeBaseline: Set<string> | null = null;
@@ -182,6 +187,10 @@ export class TeamState {
       }
     }
     this.lineup = { ...this.lineup, slots };
+  }
+
+  setMentality(value: number): void {
+    this.mentality = normalizeMentality(value);
   }
 
   resetSelection(): void {

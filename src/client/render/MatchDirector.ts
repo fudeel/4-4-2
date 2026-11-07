@@ -1,11 +1,14 @@
 import { MathUtils, Vector3, type Scene } from 'three';
-import { getFormation, type Formation } from '../../shared/model/formation';
+import { getFormation, type Formation, type FormationSlot } from '../../shared/model/formation';
 import { otherSide, type ActionReport, type MatchEvent, type MatchPhase, type MatchView, type Side, type TeamView } from '../../shared/model/match';
 import type { Sfx } from '../audio/Sfx';
 import { BallActor } from './BallActor';
 import type { CameraRig } from './CameraRig';
 import { PITCH, PitchSpace } from './PitchSpace';
 import { PlayerActor } from './PlayerActor';
+import type { StadiumEffects } from './stadium/Stadium';
+import { BallPlanner } from './tactics/BallPlanner';
+import { TeamShape, type ShapePlayer } from './tactics/TeamShape';
 
 interface TeamInfo {
   view: TeamView;
@@ -18,13 +21,17 @@ interface Scheduled {
   run: () => void;
 }
 
+/** How long a team that just lost the ball sprints back into shape. */
+const RECOVERY_MS = 2600;
+
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const sign = () => (Math.random() < 0.5 ? -1 : 1);
 
 /**
  * Turns abstract match events into choreography: who runs where, where the ball goes.
- * Between actions the players keep their team shape and knock the ball around ("the
- * players are playing" while the managers think).
+ * Off the ball every player follows the `TeamShape` (support angles in possession, a compact
+ * block out of it); between actions the team on the ball keeps it with `BallPlanner` choices
+ * ("the players are playing" while the managers think).
  */
 export class MatchDirector {
   private readonly actors = new Map<string, PlayerActor>();
@@ -32,12 +39,20 @@ export class MatchDirector {
   private readonly space = new PitchSpace('home');
   private readonly teams: Partial<Record<Side, TeamInfo>> = {};
   private readonly queue: Scheduled[] = [];
+  private readonly shape = new TeamShape();
+  private readonly planner = new BallPlanner();
+  private shapePlayers: ShapePlayer<PlayerActor>[] = [];
+  private shapeTargets: ReadonlyMap<string, Vector3> = new Map();
+  /** A player walking to a dead ball to restart play; they pick it up on arrival. */
+  private collector: PlayerActor | null = null;
   private readonly tmp = new Vector3();
+  private readonly tmpBall = new Vector3();
   private attackingSide: Side | null = null;
   private phase: MatchPhase = 'lobby';
   private actionRunning = false;
   private preparedTurn = -1;
-  private nextIdlePass = 0;
+  private nextBallDecision = 0;
+  private lastPossession: Side | null = null;
   private pendingReceiver: { actor: PlayerActor; at: number } | null = null;
   private highlighted: PlayerActor[] = [];
   private now = 0;
@@ -46,6 +61,7 @@ export class MatchDirector {
     private readonly scene: Scene,
     private readonly camera: CameraRig,
     private readonly sfx: Sfx,
+    private readonly stadium: StadiumEffects,
   ) {
     scene.add(this.ball.group, this.ball.shadowMesh);
   }
@@ -56,6 +72,7 @@ export class MatchDirector {
     this.now = now;
     this.space.setViewer(view.you);
     this.phase = view.phase;
+    this.stadium.setTeamColors(view.teams.home.team.primaryColor, view.teams.away.team.primaryColor);
     const wanted = new Set<string>();
 
     for (const side of ['home', 'away'] as const) {
@@ -75,8 +92,10 @@ export class MatchDirector {
           shirt: isKeeper ? team.team.goalkeeperColor : team.team.primaryColor,
           shorts: isKeeper ? '#1b1b1b' : team.team.secondaryColor,
           socks: isKeeper ? team.team.goalkeeperColor : team.team.primaryColor,
+          gloves: isKeeper ? '#f4f4f4' : undefined,
         }, team.team.primaryColor);
-        actor.teleport(this.shapeTarget(actor, this.tmp));
+        const spot = this.shape.restingSpot(formation.slots[slot]!);
+        actor.teleport(this.space.toWorld(side, spot.nx, spot.ny, 0, this.tmp));
         this.actors.set(id, actor);
         this.scene.add(actor.group);
       }
@@ -86,7 +105,11 @@ export class MatchDirector {
       this.scene.remove(actor.group);
       this.actors.delete(id);
       if (this.ball.holder === actor) this.ball.place(actor.position);
+      if (this.collector === actor) this.collector = null;
     }
+    this.shapePlayers = [...this.actors.values()]
+      .map(actor => ({ actor, slot: this.slotInfo(actor) }))
+      .filter((p): p is ShapePlayer<PlayerActor> => p.slot !== null);
 
     if (view.phase === 'planning' && view.turn !== this.preparedTurn) this.prepareTurn(view);
     if (view.phase === 'halftime' || view.phase === 'fulltime' || view.phase === 'lobby') {
@@ -108,19 +131,54 @@ export class MatchDirector {
 
     const turnInHalf = view.half === 1 ? view.turn : view.turn - view.turnsPerHalf;
     const kickoff = turnInHalf === 1 || view.lastAction?.outcome === 'goal';
+    this.collector = null;
     if (kickoff) {
-      this.ball.place(this.tmp.set(0, 0, 0));
-      const taker = this.pickActor(attacking, ['FWD', 'MID']);
+      const centre = this.tmp.set(0, 0, 0);
+      this.ball.place(centre);
+      const taker = this.nearest(attacking, centre, ['FWD', 'MID']);
       if (taker) {
         taker.teleport(this.space.toWorld(attacking, 0.03, 0.49));
         this.ball.giveTo(taker);
       }
       this.sfx.whistle(1);
     } else {
-      const restart = this.pickActor(attacking, ['DEF', 'MID']);
-      if (restart) this.passTo(restart, restart.position.clone(), 700, 2);
+      this.restartPlay(attacking);
     }
-    this.nextIdlePass = this.now + 1400;
+    this.nextBallDecision = this.now + 1400;
+  }
+
+  /**
+   * Gets the ball to the team about to attack the way football would: they keep it if they
+   * have it, the keeper takes a goal kick, the nearest player takes a throw-in or picks up a
+   * loose ball, and a defender still on the ball clears it to them.
+   */
+  private restartPlay(attacking: Side): void {
+    const holder = this.ball.holder;
+    if (holder?.side === attacking) return;
+    const at = this.ball.destination(this.tmpBall);
+    if (holder) {
+      // Siege: the defenders win it but can only hack it clear — straight back to the attackers.
+      const receiver = this.nearest(attacking, this.space.toWorld(attacking, 0, 0.5), ['MID', 'DEF']);
+      if (receiver) this.passTo(receiver, this.targetOf(receiver).clone(), 1000, 4);
+      return;
+    }
+    const team = this.space.toTeam(attacking, at);
+    const halfWidth = PITCH.width / 2;
+    if (team.ny < 0.01) {
+      // Over our own goal line: goal kick.
+      const spot = this.space.toWorld(attacking, Math.sign(team.nx || 1) * 0.25, 0.06);
+      this.ball.place(spot);
+      this.collector = this.keeper(attacking);
+    } else if (Math.abs(at.x) > halfWidth || team.ny > 0.99) {
+      // Out of play: throw-in on the touchline, or back into play near where it went out.
+      const spot = this.tmpBall.set(MathUtils.clamp(at.x, -halfWidth, halfWidth), 0, MathUtils.clamp(at.z, -PITCH.length / 2 + 3, PITCH.length / 2 - 3));
+      this.ball.place(spot);
+      this.collector = this.nearest(attacking, spot, ['DEF', 'MID', 'FWD']);
+    } else {
+      this.ball.place(at);
+      this.collector = this.nearest(attacking, at, ['DEF', 'MID', 'FWD']);
+    }
+    if (this.collector) this.run(this.collector, this.ball.position.clone().setY(0), 2500);
   }
 
   // ── Action playback ────────────────────────────────────────────────────────
@@ -128,9 +186,10 @@ export class MatchDirector {
   beginAction(report: ActionReport): void {
     this.actionRunning = true;
     this.attackingSide = report.attackingSide;
+    this.collector = null;
     const holder = this.ball.holder;
     if (!holder || holder.side !== report.attackingSide) {
-      const carrier = this.pickActor(report.attackingSide, ['MID', 'DEF']);
+      const carrier = this.nearest(report.attackingSide, this.ball.destination(this.tmpBall), ['MID', 'DEF', 'FWD']);
       if (carrier) this.ball.giveTo(carrier);
     }
   }
@@ -157,12 +216,20 @@ export class MatchDirector {
       case 'buildup':
         if (!actor) break;
         if (this.ball.holder !== actor) this.passTo(actor, actor.position.clone(), d * 0.4);
-        this.run(actor, this.space.toWorld(A, this.slotX(actor), 0.42), d);
+        // Carry it into the most open channel of midfield.
+        this.run(actor, this.openSpot(A, this.space.toTeam(A, actor.position).nx * 0.8, 0.44), d);
         break;
 
       case 'pass':
         if (actor && this.ball.holder !== actor) this.ball.giveTo(actor);
-        if (target) this.passTo(target, this.space.toWorld(A, this.slotX(target) * 0.9, 0.63), d * 0.8);
+        if (!target) break;
+        if (event.style === 'long_shot') {
+          // Laid off to the edge of the box, where the shooter has a sight of goal.
+          this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.5, 0.7), d * 0.75);
+        } else {
+          // Played into space in front of the receiver, where no defender is waiting.
+          this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.85, 0.64), d * 0.8);
+        }
         break;
 
       case 'dribble': {
@@ -203,17 +270,21 @@ export class MatchDirector {
 
       case 'long_ball':
         if (actor) this.ball.giveTo(actor);
-        if (target) this.passTo(target, this.space.toWorld(A, this.slotX(target) * 0.7, 0.76), d * 0.85, 7);
+        if (target) this.passTo(target, this.openSpot(A, this.space.toTeam(A, target.position).nx * 0.7, 0.76), d * 0.85, 7);
         break;
 
       case 'through_ball': {
         if (actor && this.ball.holder !== actor && actor !== target) this.ball.giveTo(actor);
         if (!target) break;
-        const side = Math.sign(this.slotX(target)) || sign();
-        const spot = this.space.toWorld(A, 0.18 * side, 0.82);
-        this.passTo(target, spot, d * 0.8);
-        const defender = this.nearest(otherSide(A), spot, ['DEF', 'MID']);
-        if (defender) this.run(defender, spot.clone().add(this.tmp.set(rand(-1.5, 1.5), 0, 1.5 * this.space.direction(A))), d);
+        if (event.style === 'cross' && actor) this.cross(A, actor, target, d);
+        else if (event.style === 'cutback' && actor) this.cutback(A, actor, target, d);
+        else {
+          // Into the runner's channel, in behind the last defender.
+          const channel = MathUtils.clamp(this.space.toTeam(A, target.position).nx * 0.55, -0.4, 0.4);
+          const spot = this.space.toWorld(A, channel, 0.82);
+          this.passTo(target, spot, d * 0.8);
+          this.trackRunner(A, spot, d);
+        }
         break;
       }
 
@@ -264,6 +335,7 @@ export class MatchDirector {
 
       case 'miss':
         this.sfx.roar(1.2, 0.35);
+        this.stadium.cheer(null, 0.35);
         break;
 
       case 'goal':
@@ -312,10 +384,27 @@ export class MatchDirector {
       this.ball.giveTo(this.pendingReceiver.actor);
       this.pendingReceiver = null;
     }
-    if (!this.actionRunning && this.phase === 'planning' && now > this.nextIdlePass) this.idlePass();
+    if (this.collector && !this.ball.holder && !this.ball.inFlight && this.collector.position.distanceTo(this.ball.position) < 1.3) {
+      this.ball.giveTo(this.collector);
+      this.collector = null;
+      this.nextBallDecision = Math.max(this.nextBallDecision, now + 700);
+    }
+    if (!this.actionRunning && this.phase === 'planning' && now > this.nextBallDecision) this.playOnTheBall();
 
+    const possession = this.possession();
+    if (possession && this.lastPossession && possession !== this.lastPossession) this.recover(this.lastPossession);
+    this.lastPossession = possession;
+
+    this.shapeTargets = this.shape.compute({
+      space: this.space,
+      players: this.shapePlayers,
+      ball: this.ball.destination(this.tmpBall),
+      holder: this.ball.holder,
+      possession,
+      mentality: { home: this.teams.home?.view.mentality ?? 0, away: this.teams.away?.view.mentality ?? 0 },
+    });
     for (const actor of this.actors.values()) {
-      if (now > actor.scriptedUntil) actor.moveTo(this.shapeTarget(actor, this.tmp), now);
+      if (now > actor.scriptedUntil) actor.moveTo(this.targetOf(actor), now);
       actor.update(dt, now, this.ball.position);
     }
     this.ball.update(dt, now);
@@ -356,14 +445,46 @@ export class MatchDirector {
       this.sfx.kick(1);
     };
 
+    let arrival: number;
     if (event.kind === 'header' && shooter) {
       const head = shooter.position.clone().setY(2.4);
       this.ball.kick(head, this.now, d * 0.45, 3);
       this.later(d * 0.45, () => strike(d * 0.5));
+      arrival = d * 0.95;
     } else {
       if (shooter && this.ball.holder !== shooter && !this.ball.inFlight) this.ball.giveTo(shooter);
       strike(d * 0.85);
+      arrival = d * 0.85;
     }
+    if (event.shotResult === 'goal') this.later(arrival, () => this.stadium.netImpact(aim, this.now));
+  }
+
+  /** The wide creator carries it towards the byline and swings it in; the striker attacks the near post. */
+  private cross(A: Side, crosser: PlayerActor, striker: PlayerActor, d: number): void {
+    const wing = Math.sign(this.space.toTeam(A, crosser.position).nx) || sign();
+    this.run(crosser, this.space.toWorld(A, wing * 0.82, 0.86), d * 0.5);
+    const meet = this.space.toWorld(A, wing * 0.12, 0.86);
+    this.run(striker, meet, d * 1.6);
+    this.trackRunner(A, meet, d * 1.6);
+    this.later(d * 0.42, () => {
+      this.ball.kick(meet.clone().setY(1.8), this.now, d * 0.55, 3.2, -wing * 0.8);
+      this.sfx.kick(0.8);
+    });
+  }
+
+  /** The creator beats his man to the byline inside the box and pulls it back to an arriving shooter. */
+  private cutback(A: Side, creator: PlayerActor, shooter: PlayerActor, d: number): void {
+    const wing = Math.sign(this.space.toTeam(A, creator.position).nx) || sign();
+    this.run(creator, this.space.toWorld(A, wing * 0.4, 0.94), d * 0.5);
+    const spot = this.space.toWorld(A, -wing * 0.05, 0.8);
+    this.run(shooter, spot, d * 1.4);
+    this.later(d * 0.45, () => this.passTo(shooter, spot, d * 0.5));
+  }
+
+  /** The nearest defender chases the run, goal-side. */
+  private trackRunner(A: Side, spot: Vector3, durationMs: number): void {
+    const defender = this.nearest(otherSide(A), spot, ['DEF', 'MID']);
+    if (defender) this.run(defender, spot.clone().add(this.tmp.set(rand(-1.2, 1.2), 0, 1.4 * this.space.direction(A))), durationMs);
   }
 
   private save(keeper: PlayerActor | null, d: number, toCorner: boolean, attacking: Side): void {
@@ -381,11 +502,13 @@ export class MatchDirector {
         this.ball.giveTo(keeper);
       }
       this.sfx.roar(1.4, 0.5);
+      this.stadium.cheer(null, 0.45);
     });
   }
 
   private celebrate(side: Side, scorer: PlayerActor | null, d: number): void {
     this.sfx.roar(3.2, 1);
+    this.stadium.cheer(side, 1);
     this.later(250, () => this.sfx.whistle(1));
     this.camera.shake(this.now, 700, 1.4);
     this.camera.setZoom(0.85);
@@ -456,19 +579,38 @@ export class MatchDirector {
     if (keeper) this.run(keeper, this.space.toWorld(A, 0, 0.985), holdMs);
   }
 
-  private idlePass(): void {
-    this.nextIdlePass = this.now + rand(1300, 2300);
+  /** The player on the ball decides: pass, carry it into space, or keep it a moment longer. */
+  private playOnTheBall(): void {
     const side = this.attackingSide;
     const holder = this.ball.holder;
-    if (!side || !holder || holder.side !== side || this.ball.inFlight) return;
-    const options = this.actorsOf(side).filter(a => a !== holder && (this.slotOf(a) !== 0 || Math.random() < 0.15));
-    const nearby = options.filter(a => a.position.distanceTo(holder.position) < 20);
-    const pool = nearby.length ? nearby : options;
-    const receiver = pool[Math.floor(Math.random() * pool.length)];
-    if (!receiver) return;
-    const point = this.shapeTarget(receiver, new Vector3());
-    const distance = point.distanceTo(holder.position);
-    this.passTo(receiver, point, Math.max(450, distance * 75), distance > 15 ? 2 : 0);
+    if (!side || !holder || holder.side !== side || this.ball.inFlight) {
+      this.nextBallDecision = this.now + 300;
+      return;
+    }
+    const holderSlot = this.slotInfo(holder);
+    const context = {
+      space: this.space,
+      side,
+      holder,
+      holderRole: holderSlot?.role ?? 'MID',
+      teammates: this.shapePlayers
+        .filter(p => p.actor.side === side && p.actor !== holder)
+        .map(p => ({ actor: p.actor, slot: p.slot, target: this.targetOf(p.actor) })),
+      opponents: this.actorsOf(otherSide(side)),
+      mentality: this.teams[side]?.view.mentality ?? 0,
+    } as const;
+    const plan = this.planner.plan(context);
+    switch (plan.kind) {
+      case 'pass':
+        this.passTo(plan.receiver, plan.point, plan.durationMs, plan.height);
+        break;
+      case 'carry':
+        this.run(holder, plan.point, plan.durationMs);
+        break;
+      case 'hold':
+        break;
+    }
+    this.nextBallDecision = this.now + (plan.kind === 'pass' ? plan.durationMs : plan.kind === 'carry' ? plan.durationMs * 0.7 : 0) + this.planner.thinkingTime(context);
   }
 
   /** Sends the ball to `point` and makes `receiver` run there to collect it. */
@@ -487,28 +629,50 @@ export class MatchDirector {
     this.queue.push({ at: this.now + delayMs, run });
   }
 
-  /** Formation position, shifted by possession, ball position and a gentle wander. */
-  private shapeTarget(actor: PlayerActor, out: Vector3): Vector3 {
-    const info = this.teams[actor.side];
-    const slotIndex = info?.slotOf.get(actor.id);
-    const slot = slotIndex !== undefined ? info!.formation.slots[slotIndex] : undefined;
-    if (!slot) return out.copy(actor.position);
-    const ball = this.space.toTeam(actor.side, this.ball.position);
-    let nx = slot.x;
-    let ny = slot.y;
-    if (slot.role === 'GK') {
-      nx = MathUtils.clamp(ball.nx * 0.12, -0.12, 0.12);
-      ny = 0.025 + MathUtils.clamp(ball.ny * 0.05, 0, 0.05);
-    } else {
-      if (this.attackingSide) ny += this.attackingSide === actor.side ? 0.1 : -0.06;
-      ny += (ball.ny - 0.5) * 0.4;
-      nx += (ball.nx - nx) * 0.22;
-      const t = this.now / 1000;
-      nx += Math.sin(t * 0.6 + actor.seed) * 0.05;
-      ny += Math.cos(t * 0.45 + actor.seed * 1.3) * 0.03;
-      ny = MathUtils.clamp(ny, 0.06, 0.95);
+  /** `side` just lost the ball: everyone caught upfield sprints back into the defensive shape. */
+  private recover(side: Side): void {
+    for (const actor of this.actorsOf(side)) actor.hurry(this.now + RECOVERY_MS);
+  }
+
+  /** Where the team shape wants this player right now. */
+  private targetOf(actor: PlayerActor): Vector3 {
+    return this.shapeTargets.get(actor.id) ?? actor.position;
+  }
+
+  /** The side on the ball: whoever holds it, whoever it's flying to, else the side due to attack. */
+  private possession(): Side | null {
+    if (this.phase === 'halftime' || this.phase === 'fulltime' || this.phase === 'lobby') return null;
+    return this.ball.holder?.side ?? this.pendingReceiver?.actor.side ?? this.collector?.side ?? this.attackingSide;
+  }
+
+  /**
+   * The point near (nx, ny) in `side`'s team space that is furthest from any opponent —
+   * where a pass should be played or a run should end.
+   */
+  private openSpot(side: Side, nx: number, ny: number, out = new Vector3()): Vector3 {
+    const opponents = this.actorsOf(otherSide(side));
+    const candidate = new Vector3();
+    let bestScore = -Infinity;
+    for (const dx of [-0.24, -0.12, 0, 0.12, 0.24]) {
+      for (const dy of [-0.05, 0, 0.05]) {
+        this.space.toWorld(side, MathUtils.clamp(nx + dx, -0.9, 0.9), MathUtils.clamp(ny + dy, 0.05, 0.92), 0, candidate);
+        let room = 12;
+        for (const opponent of opponents) room = Math.min(room, opponent.position.distanceTo(candidate));
+        // Prefer open grass, but don't wander far from the intended spot.
+        const score = room - Math.hypot(dx * 14, dy * 48) * 0.35;
+        if (score > bestScore) {
+          bestScore = score;
+          out.copy(candidate);
+        }
+      }
     }
-    return this.space.toWorld(actor.side, MathUtils.clamp(nx, -1, 1), ny, 0, out);
+    return out;
+  }
+
+  private slotInfo(actor: PlayerActor): FormationSlot | null {
+    const index = this.slotOf(actor);
+    const info = this.teams[actor.side];
+    return index !== undefined && info ? info.formation.slots[index] ?? null : null;
   }
 
   private forward(actor: PlayerActor, amount: number): Vector3 {
@@ -528,25 +692,8 @@ export class MatchDirector {
     return this.teams[actor.side]?.slotOf.get(actor.id);
   }
 
-  private slotX(actor: PlayerActor): number {
-    const index = this.slotOf(actor);
-    const info = this.teams[actor.side];
-    return index !== undefined && info ? info.formation.slots[index]?.x ?? 0 : 0;
-  }
-
   private keeper(side: Side): PlayerActor | null {
     return this.actorsOf(side).find(a => this.slotOf(a) === 0) ?? null;
-  }
-
-  private pickActor(side: Side, roles: string[]): PlayerActor | null {
-    const info = this.teams[side];
-    if (!info) return null;
-    const options = this.actorsOf(side).filter(a => {
-      const index = this.slotOf(a);
-      return index !== undefined && roles.includes(info.formation.slots[index]!.role);
-    });
-    const pool = options.length ? options : this.actorsOf(side);
-    return pool[Math.floor(Math.random() * pool.length)] ?? null;
   }
 
   private nearest(side: Side, point: Vector3, roles: string[]): PlayerActor | null {

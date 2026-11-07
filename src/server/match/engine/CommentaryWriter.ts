@@ -12,7 +12,9 @@ const TEMPLATES = {
   interception: ['{a} reads it and intercepts.', 'Cut out by {a}.', '{a} steps in front and steals it.'],
   longBall: ['{a} launches it long towards {b}!', 'Route one! {a} goes over the top for {b}.'],
   throughBall: ['{a} slides {b} through!', 'Defence-splitting pass from {a} to {b}!', '{a} lifts it over the top, {b} is in!'],
-  cross: ['{a} whips in a cross for {b}!', '{a} cuts it back to {b}!'],
+  cross: ['{a} whips in a cross for {b}!', '{a} swings it in from the flank, {b} attacks the ball!'],
+  cutback: ['{a} gets to the byline and cuts it back to {b}!', '{a} beats his man and pulls it back for {b}!'],
+  longShot: ['{a} lays it off to {b} on the edge of the box...', '{a} rolls it into the path of {b}, who has a sight of goal...'],
   soloRun: ['{a} goes alone and beats {b}!', '{a} dances past {b} into the box!'],
   clearance: ['{a} hacks it clear.', 'Hoofed away by {a}.', '{a} clears the danger.'],
   clearedForCorner: ['{a} turns it behind for a corner.', '{a} blocks the cross, corner kick.'],
@@ -36,6 +38,7 @@ const TEMPLATES = {
   dive: ['{a} goes down in the box... the referee points to the spot!'],
   diveBooked: ['{a} goes down too easily, booked for simulation!'],
   counter: ['They break forward quickly, counter-attack on!', 'Turnover in midfield, counter-attack chance!'],
+  counterExposed: ['Too many men forward — they break into the space behind!', '{a} wins it and they counter against a stretched defence!'],
 } satisfies Record<string, string[]>;
 
 export type CommentaryKey = keyof typeof TEMPLATES;
