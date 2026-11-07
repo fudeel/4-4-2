@@ -8,7 +8,7 @@ import type { Scheduler } from '../core/Scheduler';
 import type { GameDatabase } from '../data/repositories';
 import { Match, type MatchSummary, type TeamSetup } from '../match/Match';
 import type { ExhibitionOptions } from '../../shared/model/exhibition';
-import { exhibitionTeam } from './Exhibition';
+import { contrastKits, exhibitionTeam } from './Exhibition';
 import { uniqueId } from '../core/ids';
 import type { Lineup } from '../../shared/model/lineup';
 import { MatchRecorder } from '../match/MatchRecorder';
@@ -37,6 +37,7 @@ export class Room {
   private match!: Match;
   private bot: BotManager | null = null;
   private broadcastQueued = false;
+  private reserved: ReadonlySet<string> | null = null;
   readonly createdAt: number;
 
   constructor(
@@ -45,6 +46,7 @@ export class Room {
     private readonly teams: Record<Side, TeamSetup>,
     private readonly deps: RoomDependencies,
     readonly options?: ExhibitionOptions,
+    readonly nightCode?: string,
   ) {
     this.recorder = new MatchRecorder(deps.db.matches);
     this.createdAt = deps.scheduler.now();
@@ -53,12 +55,14 @@ export class Room {
 
   /** Seats a client (or re-attaches a returning one). Returns their side. */
   join(session: ClientSession, team?: TeamSetup): Side {
+    if (this.reserved && !this.reserved.has(session.clientId)) throw new GameError('room_full', 'This fixture is reserved for its two managers.');
     const existing = this.sideOf(session.clientId);
     const side = existing ?? SIDES.find(s => !this.seats[s]);
     if (!side) throw new GameError('room_full', 'This room is already full.');
     if (!existing && this.match.phase !== 'lobby') throw new GameError('invalid_phase', 'This exhibition has already started.');
     if (!existing && team && this.teams[side].team.id !== team.team.id) {
       this.teams[side] = exhibitionTeam(team, this.options?.fairPlay ?? false);
+      contrastKits(this.teams.home, this.teams.away);
       this.startMatch();
     }
 
@@ -75,10 +79,11 @@ export class Room {
     seat.session = null;
     seat.disconnectedAt = this.deps.scheduler.now();
     // Before kick-off a seat can simply be given up; afterwards it is kept for reconnection.
-    if (this.match.phase === 'lobby') {
+    if (this.match.phase === 'lobby' && !this.reserved) {
       delete this.seats[side];
       this.match.releaseSeat(side);
     } else {
+      if (this.match.phase === 'lobby') this.match.setReady(side, false);
       this.match.setConnected(side, false);
     }
   }
@@ -91,6 +96,7 @@ export class Room {
     if (seat.session !== session) return;
     seat.session = null;
     seat.disconnectedAt = this.deps.scheduler.now();
+    if (this.match.phase === 'lobby') this.match.setReady(side, false);
     this.match.setConnected(side, false);
   }
 
@@ -112,6 +118,7 @@ export class Room {
       case 'setMentality':
         return this.match.setMentality(side, message.value);
       case 'requestRematch':
+        if (this.nightCode) throw new GameError('invalid_phase', 'Return to friends night for the next scheduled fixture.');
         if (this.match.requestRematch(side)) this.startMatch();
         return;
       default:
@@ -125,6 +132,20 @@ export class Room {
   }
 
   contains(clientId: string): boolean { return this.sideOf(clientId) !== undefined; }
+
+  reserve(home: { ownerId: string; username: string }, away: { ownerId: string; username: string }): void {
+    if (this.match.phase !== 'lobby' || Object.keys(this.seats).some(s => s !== 'away' || this.opponent !== 'bot')) throw new Error('Cannot reserve an occupied room.');
+    this.reserved = new Set([home.ownerId, away.ownerId]);
+    for (const [side, member] of [['home', home], ['away', away]] as const) {
+      this.seats[side] = { clientId: member.ownerId, name: member.username, session: null, disconnectedAt: this.deps.scheduler.now() };
+      this.match.assignManager(side, { clientId: member.ownerId, name: member.username, isBot: false, connected: false });
+    }
+  }
+
+  cancel(): void {
+    for (const seat of Object.values(this.seats)) if (seat?.session) { seat.session.roomCode = null; seat.session.send({ type: 'roomLeft' }); }
+    this.dispose();
+  }
 
   /** True when no human has been connected for `idleMs`. */
   isAbandoned(now: number, idleMs: number): boolean {
@@ -185,7 +206,7 @@ export class Room {
       this.broadcastQueued = false;
       for (const side of SIDES) {
         const session = this.seats[side]?.session;
-        if (session) session.send({ type: 'state', view: { ...this.match.view(side), exhibition: this.options } });
+        if (session) session.send({ type: 'state', view: { ...this.match.view(side), exhibition: this.options, nightCode: this.nightCode } });
       }
     });
   }

@@ -4,8 +4,10 @@ import { GameError } from '../core/GameError';
 import type { TeamSetup } from '../match/Match';
 import { Room, type RoomDependencies } from './Room';
 import { DEFAULT_EXHIBITION, type ExhibitionOptions } from '../../shared/model/exhibition';
-import { exhibitionRules, exhibitionTeam } from './Exhibition';
+import { contrastKits, exhibitionRules, exhibitionTeam } from './Exhibition';
 import { overallRating } from '../../shared/model/player';
+import type { MatchSummary } from '../match/Match';
+import type { NightMember } from '../../shared/model/night';
 
 /** No 0/O or 1/I/L: codes are read aloud and typed on phones. */
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -31,6 +33,7 @@ export class RoomRegistry {
       teams.away = exhibitionTeam(teams.away, settings.fairPlay || opponent === 'bot', opponent === 'bot' ? difficulty * hostAverage / 60 : 1);
     }
     const deps = settings ? { ...this.deps, rules: exhibitionRules(this.deps.rules, settings) } : this.deps;
+    contrastKits(teams.home, teams.away);
     const room = new Room(code, opponent, teams, deps, settings);
     this.rooms.set(code, room);
     return room;
@@ -41,6 +44,24 @@ export class RoomRegistry {
   }
 
   isClubBusy(ownerId: string): boolean { return !!this.activeRoom(ownerId); }
+
+  createFixture(home: TeamSetup, away: TeamSetup, members: [NightMember, NightMember], nightCode: string, finished: (summary: MatchSummary) => void): Room {
+    const code = this.generateCode();
+    const options = { ...DEFAULT_EXHIBITION, fairPlay: true, pace: 'quick' as const };
+    const teams = { home: exhibitionTeam(home, true), away: exhibitionTeam(away, true) };
+    contrastKits(teams.home, teams.away);
+    const room = new Room(code, 'human', teams, {
+      ...this.deps, rules: exhibitionRules(this.deps.rules, options),
+      onFinished: (id, summary) => { this.deps.onFinished?.(id, summary); finished(summary); },
+      // Competition squads/lineups are sealed for the evening; don't persist temporary match choices.
+      onLineup: undefined,
+    }, options, nightCode);
+    room.reserve(members[0], members[1]);
+    this.rooms.set(code, room);
+    return room;
+  }
+
+  cancel(code: string): void { const room = this.rooms.get(code); if (room) { room.cancel(); this.rooms.delete(code); } }
 
   find(code: string): Room {
     const room = this.rooms.get(code.trim().toUpperCase());

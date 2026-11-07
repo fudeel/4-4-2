@@ -13,3 +13,14 @@ export function exhibitionTeam(setup: TeamSetup, fairPlay: boolean, factor = 1):
   for (const p of result.squad) for (const key of Object.keys(p.attributes) as (keyof typeof p.attributes)[]) p.attributes[key] = Math.max(1, Math.min(99, Math.round(p.attributes[key] * scale)));
   return result;
 }
+
+/** Give the away side a readable alternate kit when two custom colours clash. */
+export function contrastKits(home: TeamSetup, away: TeamSetup): void {
+  const rgb = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  const a = rgb(home.team.primaryColor), b = rgb(away.team.primaryColor);
+  if (Math.hypot(...a.map((c, i) => c - b[i]!)) < 100) {
+    const light = (a[0]! * 0.2126 + a[1]! * 0.7152 + a[2]! * 0.0722) / 255;
+    away.team.primaryColor = light > 0.6 ? '#23304c' : '#f0f3e8';
+    away.team.secondaryColor = light > 0.6 ? '#f0f3e8' : '#23304c';
+  }
+}

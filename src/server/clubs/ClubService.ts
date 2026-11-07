@@ -6,15 +6,16 @@ import { JsonFileStore } from '../data/JsonFileStore';
 import { SEED_PLAYERS, SEED_TEAMS } from '../data/seed';
 import type { MatchSummary } from '../match/Match';
 import { CORE_SKILLS, expectedAttendance, FACILITIES, facilityQuote, MAX_SQUAD, trainingQuote, YOUTH_MATCHES, type Facility } from '../../shared/model/progression';
-import type { AttributeKey, PlayerProfile, Position } from '../../shared/model/player';
+import { overallRating, type AttributeKey, type PlayerProfile, type Position } from '../../shared/model/player';
 import { otherSide } from '../../shared/model/match';
+import type { NightStanding } from '../../shared/model/night';
 
 export interface ClubDatabase { clubs: ClubView[]; settled: string[] }
 export class ClubService {
   readonly store: JsonFileStore<ClubDatabase>;
   constructor(path: string) {
     this.store = new JsonFileStore(path, () => ({ clubs: [], settled: [] }));
-    this.store.update(db => { db.settled ??= []; for (const club of db.clubs) { club.history ??= []; club.prospects ??= []; club.youthProgress ??= 0; } });
+    this.store.update(db => { db.settled ??= []; for (const club of db.clubs) { club.history ??= []; club.prospects ??= []; club.youthProgress ??= 0; club.trophies ??= []; } });
   }
   findOwner(ownerId: string): ClubView | null {
     const club = this.store.read().clubs.find(c => c.ownerId === ownerId);
@@ -43,7 +44,7 @@ export class ClubService {
       stadium: { name: `${name.trim()} Ground`, level: 1 }, youthLevel: 0, trainingLevel: 1,
       fans: 50, reputation: 1, morale: 70, record: { played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0 }, form: [],
       development: Object.fromEntries(squad.map((p, i) => [p.id, { xp: 0, potential: 74 + i % 10, sessions: 0 }])),
-      ledger: [{ id: `founding-${id}`, at: createdAt, label: 'Founding grant', amount: STARTING_BUDGET }], history: [], prospects: [], youthProgress: 0, createdAt,
+      ledger: [{ id: `founding-${id}`, at: createdAt, label: 'Founding grant', amount: STARTING_BUDGET }], history: [], prospects: [], youthProgress: 0, trophies: [], createdAt,
     };
     this.store.update(db => db.clubs.push(club));
     return structuredClone(club);
@@ -135,6 +136,39 @@ export class ClubService {
       club.team.playerIds.push(prospect.player.id);
       club.development[prospect.player.id] = { xp: 0, potential: prospect.potential, sessions: 0 };
       club.prospects = club.prospects.filter(p => p.player.id !== prospectId);
+    });
+  }
+
+  release(ownerId: string, playerId: string): ClubView {
+    return this.change(ownerId, club => {
+      const player = club.squad.find(p => p.id === playerId);
+      if (!player) throw new ApiError(404, 'Player not found.');
+      if (club.lineup.slots.includes(playerId)) throw new ApiError(400, 'Move this player to the bench first.');
+      if (club.squad.length <= 12) throw new ApiError(400, 'Keep at least 12 players in your squad. Promote a prospect before releasing a player.');
+      if (player.position === 'GK' && club.squad.filter(p => p.position === 'GK').length <= 2) throw new ApiError(400, 'Keep two goalkeepers.');
+      const fee = Math.round(overallRating(player) * 25);
+      club.budget += fee;
+      club.ledger = [...club.ledger, { id: randomBytes(8).toString('hex'), at: Date.now(), label: `${player.name} · release compensation`, amount: fee }].slice(-100);
+      club.squad = club.squad.filter(p => p.id !== playerId);
+      club.team.playerIds = club.team.playerIds.filter(id => id !== playerId);
+      delete club.development[playerId];
+    });
+  }
+
+  awardNight(code: string, name: string, standings: NightStanding[]): void {
+    const id = `night-prize-${code}`;
+    if (this.store.read().settled.includes(id)) return;
+    this.store.update(db => {
+      if (db.settled.includes(id)) return;
+      db.settled.push(id);
+      for (const row of standings) {
+        const club = db.clubs.find(c => c.ownerId === row.ownerId);
+        if (!club) continue;
+        const prize = row.rank === 1 ? 10000 : row.rank === 2 ? 5000 : row.rank === 3 ? 2500 : 1000;
+        club.budget += prize;
+        club.ledger = [...club.ledger, { id, at: Date.now(), label: `${name} · place ${row.rank} prize`, amount: prize }].slice(-100);
+        if (row.rank <= 3) club.trophies = [...club.trophies, { nightCode: code, name, rank: row.rank, at: Date.now() }].slice(-50);
+      }
     });
   }
 

@@ -137,6 +137,7 @@ export class FullTimeSheet extends Sheet {
     const theyWant = view.rematch[otherSide(view.you)];
     const iWant = view.rematch[view.you];
     this.rematchButton.disabled = iWant;
+    this.rematchButton.hidden = !!view.nightCode;
     setText(this.rematchButton, iWant ? 'Waiting for opponent…' : theyWant ? 'Accept rematch' : 'Rematch');
 
     render(this.body,
@@ -155,7 +156,7 @@ export class FullTimeSheet extends Sheet {
       statsTable(view),
       theyWant && !iWant ? h('p', { class: 'lobby__status' }, `${opponent.manager?.name ?? 'Opponent'} wants a rematch!`) : null,
       h('footer', { class: 'sheet__footer sheet__footer--row' },
-        h('button', { class: 'btn btn--ghost', onClick: () => this.actions.leaveRoom() }, 'Leave'),
+        h('button', { class: 'btn btn--ghost', onClick: () => this.actions.leaveRoom() }, view.nightCode ? 'Back to friends night' : 'Back to my club'),
         this.rematchButton,
       ),
     );

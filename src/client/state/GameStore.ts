@@ -7,8 +7,13 @@ import type { ClubView } from '../../shared/model/club';
 import type { ExhibitionOptions } from '../../shared/model/exhibition';
 import type { AttributeKey } from '../../shared/model/player';
 import type { Facility } from '../../shared/model/progression';
+import type { NightView } from '../../shared/model/night';
 
 export interface ClientState {
+  night: NightView | null;
+  nightOpen: boolean;
+  nightBusy: boolean;
+  nightError: string;
   club: ClubView | null;
   clubReady: boolean;
   clubBusy: boolean;
@@ -26,6 +31,17 @@ export interface ClientState {
 
 /** Everything the UI can ask for. Screens depend on this interface, not on the network (DIP). */
 export interface GameActions {
+  openNight(): void;
+  closeNight(): void;
+  createNight(name: string): void;
+  joinNight(code: string): void;
+  startNight(): void;
+  leaveNight(): void;
+  playFixture(id: string): void;
+  concedeFixture(id: string): void;
+  refreshNight(): void;
+  saveClubLineup(lineup: Lineup): void;
+  releasePlayer(id: string): void;
   upgradeFacility(facility: Facility): void;
   trainPlayer(playerId: string, attribute: AttributeKey): void;
   promoteProspect(playerId: string): void;

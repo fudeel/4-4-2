@@ -1,5 +1,5 @@
 import { money } from '../../../shared/model/club';
-import { ATTRIBUTE_LABELS, type AttributeKey } from '../../../shared/model/player';
+import { ATTRIBUTE_LABELS, overallRating, type AttributeKey } from '../../../shared/model/player';
 import { CORE_SKILLS, expectedAttendance, FACILITIES, FACILITY_NAMES, facilityLevel, facilityQuote, MAX_SQUAD, TRAINABLE, trainingQuote, YOUTH_MATCHES } from '../../../shared/model/progression';
 import type { ClientState } from '../../state/GameStore';
 import { h, render, setText } from '../dom';
@@ -30,7 +30,7 @@ export class ProgressionPanel {
       const level = facilityLevel(club, facility);
       return h('article', { class: 'upgrade-card' },
         h('h3', null, `${FACILITY_NAMES[facility]} · ${level ? `Level ${level}` : 'Not built'}`),
-        h('p', { class: 'muted' }, q.benefit),
+        h('p', { class: 'muted' }, `${level < 5 ? 'Next level · ' : ''}${q.benefit}`),
         h('small', { class: q.recommended ? 'recommendation' : 'muted' }, q.recommended ? 'A useful next investment for this club' : facility === 'stadium' ? 'Grow your crowd before buying empty seats.' : 'Build when it fits your development plan.'),
         h('button', { class: 'btn btn--primary', disabled: !q.allowed || state.clubBusy, onClick: () => this.ctx.actions.upgradeFacility(facility) }, level >= 5 ? 'Maximum level' : `${level ? 'Upgrade' : 'Build'} · ${money(q.cost)} credits`),
         !q.allowed ? h('small', { class: 'muted' }, q.reason) : null);
@@ -44,6 +44,7 @@ export class ProgressionPanel {
         h('small', { class: 'muted' }, `${player.position} · Age ${player.age} · ${club.development[player.id]!.xp} XP · Skill ceiling ${club.development[player.id]!.potential}`),
         select, h('p', { class: 'muted' }, q.benefit),
         h('button', { class: 'btn btn--ghost', disabled: !q.allowed || state.clubBusy, onClick: () => this.ctx.actions.trainPlayer(player.id, attribute) }, `Train +${q.gain} · ${money(q.cost)} credits · ${q.xpCost} XP`),
+        !club.lineup.slots.includes(player.id) ? h('button', { class: 'btn btn--ghost btn--small', disabled: state.clubBusy || club.squad.length <= 12 || (player.position === 'GK' && club.squad.filter(p => p.position === 'GK').length <= 2), onClick: () => this.ctx.actions.releasePlayer(player.id) }, `Release bench player · +${money(Math.round(overallRating(player) * 25))} credits`) : null,
         !q.allowed ? h('small', { class: 'muted' }, q.reason) : null);
     }));
     render(this.prospects,

@@ -6,7 +6,7 @@ import { GameStore } from './state/GameStore';
 import './styles/main.css';
 
 const identity = new Identity();
-const store = new GameStore({ club: null, clubReady: false, clubBusy: false, clubError: '', account: null, authReady: false, authBusy: false, authError: '', connection: 'offline', view: null, clockOffset: 0, playerName: identity.name });
+const store = new GameStore({ night: null, nightOpen: false, nightBusy: false, nightError: '', club: null, clubReady: false, clubBusy: false, clubError: '', account: null, authReady: false, authBusy: false, authError: '', connection: 'offline', view: null, clockOffset: 0, playerName: identity.name });
 const root = document.getElementById('app');
 if (!root) throw new Error('Missing #app root element');
 

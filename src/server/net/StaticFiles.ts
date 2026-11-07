@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -24,9 +24,11 @@ export function createStaticHandler(rootDir: string) {
       res.end('4-4-2 game server is running. In development open the Vite URL (http://localhost:5173). For production run `npm run build` first.');
       return;
     }
-    const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/');
+    let urlPath: string;
+    try { urlPath = decodeURIComponent((req.url ?? '/').split('?')[0] ?? '/'); }
+    catch { res.writeHead(400); res.end('Invalid URL.'); return; }
     const candidate = normalize(join(root, urlPath));
-    const safe = candidate.startsWith(root) && existsSync(candidate) && statSync(candidate).isFile();
+    const safe = candidate.startsWith(root + sep) && existsSync(candidate) && statSync(candidate).isFile();
     const filePath = safe ? candidate : join(root, 'index.html');
     res.writeHead(200, { 'Content-Type': CONTENT_TYPES[extname(filePath)] ?? 'application/octet-stream' });
     res.end(readFileSync(filePath));

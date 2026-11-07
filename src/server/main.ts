@@ -14,6 +14,7 @@ import { RoomRegistry } from './rooms/RoomRegistry';
 import { AccountService } from './accounts/AccountService';
 import { ManagerApi } from './net/ManagerApi';
 import { ClubService } from './clubs/ClubService';
+import { NightService } from './clubs/NightService';
 
 /* Composition root: the only place that knows concrete implementations. */
 
@@ -39,7 +40,8 @@ const registry = new RoomRegistry(
 );
 
 const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
-const api = new ManagerApi(accounts, clubs, ownerId => registry.isClubBusy(ownerId));
+const nights = new NightService(resolve(process.env.NIGHTS_PATH ?? 'data/nights.json'), clubs, registry);
+const api = new ManagerApi(accounts, clubs, ownerId => registry.isClubBusy(ownerId), nights);
 const staticHandler = createStaticHandler(resolve('dist/client'));
 const httpServer = createServer((req, res) => {
   if (req.url?.startsWith('/api/')) void api.handle(req, res);

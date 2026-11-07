@@ -184,6 +184,7 @@ export interface MatchResultView {
 
 export interface MatchView {
   exhibition?: ExhibitionOptions;
+  nightCode?: string;
   roomCode: string;
   you: Side;
   phase: MatchPhase;

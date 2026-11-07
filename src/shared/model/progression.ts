@@ -18,7 +18,7 @@ export function expectedAttendance(club: ClubView): number {
   return Math.min(stadiumCapacity(club.stadium.level), Math.round(club.fans * (0.65 + club.morale / 300)));
 }
 export function facilityQuote(club: ClubView, facility: Facility): UpgradeQuote {
-  const level = facilityLevel(club, facility), next = level + 1;
+  const level = facilityLevel(club, facility), next = Math.min(5, level + 1);
   const base = { stadium: 18000, training: 14000, youth: 22000 }[facility];
   const cost = Math.round(base * Math.pow(1.7, level) * (1 - Math.min(0.1, club.reputation / 1000)) / 100) * 100;
   let reason = '';
@@ -26,7 +26,7 @@ export function facilityQuote(club: ClubView, facility: Facility): UpgradeQuote 
   else if (club.record.played < Math.max(0, next - 2) * 3) reason = `Play ${Math.max(0, next - 2) * 3} exhibitions before this expansion.`;
   else if (facility === 'stadium' && club.fans < stadiumCapacity(level) * 0.65) reason = `Grow to ${Math.ceil(stadiumCapacity(level) * 0.65)} fans before expanding.`;
   else if (club.budget < cost) reason = 'Not enough credits.';
-  const benefit = facility === 'stadium'
+  const benefit = level >= 5 ? 'Your facility is at its maximum level.' : facility === 'stadium'
     ? `${stadiumCapacity(next)} seats. Gate receipts depend on fans, morale and actual attendance.`
     : facility === 'training' ? `+${next * 2} match XP for starters; more efficient individual training.`
       : `A prospect every ${YOUTH_MATCHES(next)} completed exhibitions. Higher levels improve potential and promotion costs.`;
