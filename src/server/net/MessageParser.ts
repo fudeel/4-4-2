@@ -27,7 +27,11 @@ export function parseClientMessage(raw: string): ClientMessage | null {
         ? { type: 'hello', clientId: data.clientId, name: sanitizeName(data.name) }
         : null;
     case 'createRoom':
-      return data.opponent === 'human' || data.opponent === 'bot' ? { type: 'createRoom', opponent: data.opponent } : null;
+      if (data.opponent !== 'human' && data.opponent !== 'bot') return null;
+      if (data.options === undefined) return { type: 'createRoom', opponent: data.opponent };
+      if (!isObject(data.options)) return null;
+      if (!['quick', 'classic'].includes(String(data.options.pace)) || typeof data.options.fairPlay !== 'boolean' || !['casual', 'balanced', 'challenging'].includes(String(data.options.difficulty))) return null;
+      return { type: 'createRoom', opponent: data.opponent, options: data.options as unknown as Extract<ClientMessage, { type: 'createRoom' }>['options'] };
     case 'joinRoom':
       return isShortString(data.code, 12) ? { type: 'joinRoom', code: data.code } : null;
     case 'leaveRoom':

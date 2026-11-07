@@ -2,7 +2,7 @@
 
 A mobile-first, turn-based, card-driven **6-a-side football manager**. TypeScript everywhere, Three.js for the match, a small authoritative Node server for multiplayer, and a local JSON database.
 
-> Scope of this version: **the match only**. Leagues, rankings, finances and transfers come later.
+> Create a manager account, build a persistent club, develop your squad and bring friends together for an evening of football.
 
 ## Quick start
 
@@ -12,9 +12,11 @@ npm run dev
 ```
 
 - Open **http://localhost:5173**. The game server runs on port 3001 and Vite proxies `/ws` to it.
-- **Two-player test on one computer:** click *Play a friend*, then open the same URL (it now contains `?room=CODE`) in a **second tab or browser**. Each tab is a different manager (the identity lives in `sessionStorage`), and reloading a tab keeps your seat.
+- **First visit:** register with a username (1–16 letters, no numbers, spaces or symbols) and a password (8–128 characters). Then name your club and choose its abbreviation and colour. No email is required.
+- **Two-player test on one computer:** use two browser profiles, or a regular window and a private window, with separate accounts. Cookies identify the manager; a reload keeps your seat. Two tabs in the same profile share an account.
 - **On your phone:** use the *Network* URL that Vite prints (e.g. `http://192.168.1.x:5173`) while on the same Wi-Fi.
 - **Solo:** *Practice vs AI* puts a bot in the away seat.
+- **Friends night:** host a night, share its **five-letter code** or invitation link, and invite 2–8 managers. The host starts a round-robin evening with balanced, quick matches, live standings and club prizes. Exhibition rooms use **four-character codes**.
 
 Other scripts:
 
@@ -24,6 +26,29 @@ Other scripts:
 | `npm run simulate -- 2000` | Plays 2000 bot-vs-bot matches and prints balance stats (`--swap` swaps home/away, `--home=-100` / `--away=50` fix a side's mentality) |
 | `npm run typecheck` | Type-checks client and server |
 | `npm run build && npm start` | Production: one server on port 3001 (or `$PORT`/`$GAME_PORT`) serving the built client and WebSocket |
+
+## Your club
+
+Every club starts equally: **12 basic players, 100,000 credits, 50 fans, a level-1 stadium (100 seats), a level-1 training ground and no youth academy**. Your club colours, lineup, finances, match history, development and trophies are saved on the server.
+
+- **Exhibitions:** quick games have 6 turns, 12-second planning and a 15-second break; classic games retain 18 turns and the original timing. Play a friend by room code or choose casual, balanced or challenging AI. Fair play balances match squads without modifying saved player attributes; turn it off to use club strength. Clashing away kits are adjusted automatically.
+- **Finances and fans:** completed matches earn appearance and performance income; the home side also earns gate receipts based on actual attendance. Morale, reputation and results affect demand and growth. Repeat opponents progressively reduce income; after 12 exhibitions in a rolling 24-hour window, credit rewards drop to 25%. Results settle once.
+- **Facilities:** stadium expansion depends on demand and experience. Training improves XP and development efficiency. Academy levels improve the quality and frequency of prospects. All facilities cap at level 5; quotes explain costs, benefits and prerequisites before purchase.
+- **Players:** train individual skills using credits and XP. Age, role, training facilities, existing skills and potential determine costs and gains. Save your starting six from the club screen; promote academy prospects or release eligible bench players while keeping at least 12 players and two keepers. Squads cap at 18.
+- **Youth:** once built, an academy produces a prospect every 2–4 completed exhibitions, prioritising positions needing depth. No real-time waiting is required. Up to three prospects can await promotion.
+- **Friends night:** squads are sealed when the evening starts. Every pair meets once; different games in the same round can run simultaneously. Standings use points, goal difference and goals scored; complete ties share the place. Managers can concede their own games 0–1. Walkovers do not earn match income; nights consisting entirely of walkovers do not award prizes. Podium places earn trophies, with 10,000/5,000/2,500-credit prizes; other participants receive 1,000 credits.
+
+## Implementation branches
+
+The five branches are cumulative and can be reviewed/merged in order. **Branch 5 contains the complete implementation.**
+
+| Branch | Adds |
+| --- | --- |
+| `codex/01-accounts` | Registration, login, logout, persistent authenticated sessions |
+| `codex/02-clubs` | Club creation, equal starter squads, resources and club dashboard |
+| `codex/03-exhibitions` | Owned clubs in code/AI exhibitions, quick/classic settings, saved results |
+| `codex/04-progression` | Facilities, income, fan growth, training, youth and atomic spending |
+| `codex/05-friends-night` | Complete game, multi-manager evenings, schedules, standings, trophies, squad management and polish |
 
 ## How a match works
 
@@ -119,6 +144,12 @@ Design notes:
 - **Stylised low-poly look.** Players, ball and props are flat-shaded and vertex-coloured, so a body segment is one mesh and every player shares one material; the ball's pentagons come from subdividing an icosahedron. One low golden-hour sun casts real (PCF soft) shadows, ACES tone mapping and a sky dome set the mood, the nets bulge when a goal goes in and the scoring side's fans jump — all fan motion runs in the vertex shader (two draw calls for ~2,000 fans). Phones get a smaller shadow map.
 - **No spoilers.** Commentary lines and the score are revealed in step with the 3D animation.
 
-The local database is `data/db.json` (created and seeded on first run). It stores teams, players, finished matches and per-player career stats. Delete it to reset.
+Persistent data is created on first run: `data/db.json` stores match records/career stats, `data/managers.json` stores accounts and session digests, `data/clubs.json` stores owned clubs and progression, and `data/nights.json` stores evenings and sealed squads. Back up all four together. Corrupt data is preserved and reported rather than silently reset.
+
+Environment overrides: `GAME_PORT`, `DB_PATH`, `ACCOUNTS_PATH`, `CLUBS_PATH`, and `NIGHTS_PATH`. Passwords use salted scrypt hashes. Sessions expire after seven days, use HttpOnly/SameSite cookies, and are revoked on logout. For an HTTPS reverse proxy, set `COOKIE_SECURE=true`; plain HTTP is supported for local Wi-Fi play. Username/password-only accounts do not include email recovery.
+
+Exhibition rooms are held in memory. On a server restart, interrupted friends-night fixtures become pending again; completed scores and prizes remain saved. This JSON-backed server is intended for one Node process.
+
+`npm test` includes account/API/socket ownership, persistence, club economy, development, fixture scheduling, reserved seats, score/prize idempotency, restart recovery, the match engine and 3D playback regressions.
 #   4 - 4 - 2  
  

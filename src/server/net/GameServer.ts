@@ -1,4 +1,4 @@
-import type { Server } from 'node:http';
+import type { IncomingMessage, Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { WS_PATH, type ClientMessage, type ServerMessage } from '../../shared/protocol';
 import { GameError } from '../core/GameError';
@@ -6,6 +6,9 @@ import type { Clock } from '../core/Scheduler';
 import type { RoomRegistry } from '../rooms/RoomRegistry';
 import { ClientSession } from './ClientSession';
 import { parseClientMessage } from './MessageParser';
+import type { AccountService } from '../accounts/AccountService';
+import type { ClubService } from '../clubs/ClubService';
+import type { TeamSetup } from '../match/Match';
 
 const HEARTBEAT_MS = 15_000;
 
@@ -13,15 +16,25 @@ const HEARTBEAT_MS = 15_000;
 export class GameServer {
   private readonly sessions = new Map<WebSocket, ClientSession>();
   private readonly alive = new WeakSet<WebSocket>();
+  private readonly requests = new WeakMap<WebSocket, IncomingMessage>();
 
   constructor(
     private readonly registry: RoomRegistry,
     private readonly clock: Clock,
+    private readonly accounts?: AccountService,
+    private readonly clubs?: ClubService,
   ) {}
 
   attach(httpServer: Server): void {
-    const wss = new WebSocketServer({ server: httpServer, path: WS_PATH, maxPayload: 16 * 1024 });
-    wss.on('connection', socket => this.onConnection(socket));
+    const wss = new WebSocketServer({ server: httpServer, path: WS_PATH, maxPayload: 16 * 1024,
+      verifyClient: (info: { origin: string; req: IncomingMessage }) => {
+        if (!this.accounts) return true;
+        try {
+          return (!info.origin || new URL(info.origin).host === info.req.headers.host) && !!this.accounts.authenticateCookie(info.req.headers.cookie);
+        } catch { return false; }
+      },
+    });
+    wss.on('connection', (socket, req) => { this.requests.set(socket, req); this.onConnection(socket); });
     const heartbeat = setInterval(() => {
       for (const socket of wss.clients) {
         if (!this.alive.has(socket)) {
@@ -50,11 +63,14 @@ export class GameServer {
     };
     const message = parseClientMessage(raw);
     if (!message) return send({ type: 'error', code: 'bad_request', message: 'Malformed message.' });
+    const account = this.accounts?.authenticateCookie(this.requests.get(socket)?.headers.cookie);
+    if (this.accounts && !account) { socket.close(4001, 'Sign in again.'); return; }
 
     if (message.type === 'hello') {
       const existing = this.sessions.get(socket);
-      const session = existing?.clientId === message.clientId ? existing : new ClientSession(message.clientId, { send });
-      session.name = message.name;
+      const clientId = account?.id ?? message.clientId;
+      const session = existing?.clientId === clientId ? existing : new ClientSession(clientId, { send });
+      session.name = account?.username ?? message.name;
       this.sessions.set(socket, session);
       return send({ type: 'welcome', clientId: session.clientId, serverNow: this.clock.now() });
     }
@@ -77,16 +93,21 @@ export class GameServer {
   private route(session: ClientSession, message: Exclude<ClientMessage, { type: 'hello' }>): void {
     switch (message.type) {
       case 'createRoom': {
+        const active = this.registry.activeRoom(session.clientId);
+        if (active && active.code !== session.roomCode) throw new GameError('invalid_phase', 'Your club is already in another exhibition. Rejoin that room first.');
+        const club = this.clubTeam(session.clientId);
         this.leaveCurrentRoom(session);
-        const room = this.registry.create(message.opponent);
+        const room = this.registry.create(message.opponent, club, message.options);
         room.join(session);
         session.roomCode = room.code;
         return;
       }
       case 'joinRoom': {
         const room = this.registry.find(message.code);
+        const active = this.registry.activeRoom(session.clientId);
+        if (active && active.code !== room.code) throw new GameError('invalid_phase', 'Leave your current exhibition before joining another.');
         if (session.roomCode && session.roomCode !== room.code) this.leaveCurrentRoom(session);
-        room.join(session);
+        room.join(session, this.clubTeam(session.clientId));
         session.roomCode = room.code;
         return;
       }
@@ -97,6 +118,13 @@ export class GameServer {
         if (!session.roomCode) throw new GameError('not_in_room', 'Join a room first.');
         this.registry.find(session.roomCode).handle(session.clientId, message);
     }
+  }
+
+  private clubTeam(ownerId: string): TeamSetup | undefined {
+    if (!this.clubs) return undefined;
+    const club = this.clubs.findOwner(ownerId);
+    if (!club) throw new GameError('invalid_lineup', 'Create your club before joining an exhibition.');
+    return { team: club.team, squad: club.squad, lineup: club.lineup };
   }
 
   private leaveCurrentRoom(session: ClientSession): void {

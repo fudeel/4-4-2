@@ -2,8 +2,26 @@ import type { Lineup } from '../../shared/model/lineup';
 import type { MatchView } from '../../shared/model/match';
 import type { OpponentKind } from '../../shared/protocol';
 import type { ConnectionStatus } from '../net/GameConnection';
+import type { AccountView } from '../../shared/model/account';
+import type { ClubView } from '../../shared/model/club';
+import type { ExhibitionOptions } from '../../shared/model/exhibition';
+import type { AttributeKey } from '../../shared/model/player';
+import type { Facility } from '../../shared/model/progression';
+import type { NightView } from '../../shared/model/night';
 
 export interface ClientState {
+  night: NightView | null;
+  nightOpen: boolean;
+  nightBusy: boolean;
+  nightError: string;
+  club: ClubView | null;
+  clubReady: boolean;
+  clubBusy: boolean;
+  clubError: string;
+  account: AccountView | null;
+  authReady: boolean;
+  authBusy: boolean;
+  authError: string;
   connection: ConnectionStatus;
   view: MatchView | null;
   /** serverTime − Date.now(), so countdowns agree across devices. */
@@ -13,8 +31,24 @@ export interface ClientState {
 
 /** Everything the UI can ask for. Screens depend on this interface, not on the network (DIP). */
 export interface GameActions {
-  setName(name: string): void;
-  createRoom(opponent: OpponentKind): void;
+  openNight(): void;
+  closeNight(): void;
+  createNight(name: string): void;
+  joinNight(code: string): void;
+  startNight(): void;
+  leaveNight(): void;
+  playFixture(id: string): void;
+  concedeFixture(id: string): void;
+  refreshNight(): void;
+  saveClubLineup(lineup: Lineup): void;
+  releasePlayer(id: string): void;
+  upgradeFacility(facility: Facility): void;
+  trainPlayer(playerId: string, attribute: AttributeKey): void;
+  promoteProspect(playerId: string): void;
+  createClub(name: string, shortName: string, color: string): void;
+  signIn(username: string, password: string, register: boolean): void;
+  signOut(): void;
+  createRoom(opponent: OpponentKind, options?: ExhibitionOptions): void;
   joinRoom(code: string): void;
   leaveRoom(): void;
   setLineup(lineup: Lineup): void;

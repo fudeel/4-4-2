@@ -11,6 +11,10 @@ import type { TeamSetup } from './match/Match';
 import { GameServer } from './net/GameServer';
 import { createStaticHandler } from './net/StaticFiles';
 import { RoomRegistry } from './rooms/RoomRegistry';
+import { AccountService } from './accounts/AccountService';
+import { ManagerApi } from './net/ManagerApi';
+import { ClubService } from './clubs/ClubService';
+import { NightService } from './clubs/NightService';
 
 /* Composition root: the only place that knows concrete implementations. */
 
@@ -18,6 +22,7 @@ const PORT = Number(process.env.GAME_PORT ?? process.env.PORT ?? 3001);
 const DB_PATH = resolve(process.env.DB_PATH ?? 'data/db.json');
 
 const db = createJsonDatabase(DB_PATH);
+const clubs = new ClubService(resolve(process.env.CLUBS_PATH ?? 'data/clubs.json'));
 const scheduler = new SystemScheduler();
 
 function teamsForNewRoom(): { home: TeamSetup; away: TeamSetup } {
@@ -30,12 +35,19 @@ function teamsForNewRoom(): { home: TeamSetup; away: TeamSetup } {
 }
 
 const registry = new RoomRegistry(
-  { db, rules: DEFAULT_RULES, scheduler, createRng: () => new SeededRng(randomInt(2 ** 31)) },
+  { db, rules: DEFAULT_RULES, scheduler, createRng: () => new SeededRng(randomInt(2 ** 31)), onFinished: (id, summary) => clubs.recordMatch(id, summary), onLineup: (ownerId, lineup) => clubs.setLineup(ownerId, lineup) },
   teamsForNewRoom,
 );
 
-const httpServer = createServer(createStaticHandler(resolve('dist/client')));
-new GameServer(registry, scheduler).attach(httpServer);
+const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
+const nights = new NightService(resolve(process.env.NIGHTS_PATH ?? 'data/nights.json'), clubs, registry);
+const api = new ManagerApi(accounts, clubs, ownerId => registry.isClubBusy(ownerId), nights);
+const staticHandler = createStaticHandler(resolve('dist/client'));
+const httpServer = createServer((req, res) => {
+  if (req.url?.startsWith('/api/')) void api.handle(req, res);
+  else staticHandler(req, res);
+});
+new GameServer(registry, scheduler, accounts, clubs).attach(httpServer);
 setInterval(() => registry.sweep(), 60_000).unref();
 
 httpServer.listen(PORT, () => {

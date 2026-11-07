@@ -20,8 +20,10 @@ export class JsonFileStore<T> {
   }
 
   update(mutate: (data: T) => void): void {
-    mutate(this.data);
-    this.flush();
+    const previous = this.data;
+    this.data = structuredClone(previous);
+    try { mutate(this.data); this.flush(); }
+    catch (error) { this.data = previous; throw error; }
   }
 
   private load(createDefault: () => T): T {
@@ -29,7 +31,7 @@ export class JsonFileStore<T> {
       try {
         return JSON.parse(readFileSync(this.filePath, 'utf8')) as T;
       } catch (error) {
-        console.warn(`[db] Could not parse ${this.filePath}, starting fresh.`, error);
+        throw new Error(`Cannot read database ${this.filePath}. Existing data was preserved.`, { cause: error });
       }
     }
     const fresh = createDefault();

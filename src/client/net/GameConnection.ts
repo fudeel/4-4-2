@@ -8,6 +8,8 @@ type Listener<T> = (value: T) => void;
 export class GameConnection {
   private socket: WebSocket | null = null;
   private retries = 0;
+  private enabled = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly messageListeners = new Set<Listener<ServerMessage>>();
   private readonly statusListeners = new Set<Listener<ConnectionStatus>>();
   private readonly openListeners = new Set<() => void>();
@@ -20,6 +22,8 @@ export class GameConnection {
   }
 
   connect(): void {
+    this.enabled = true;
+    if (this.socket) return;
     this.setStatus('connecting');
     const socket = new WebSocket(this.url);
     this.socket = socket;
@@ -40,8 +44,17 @@ export class GameConnection {
       this.socket = null;
       this.setStatus('offline');
       const delay = Math.min(5000, 500 * 2 ** this.retries++);
-      setTimeout(() => this.connect(), delay);
+      if (this.enabled) this.retryTimer = setTimeout(() => this.connect(), delay);
     });
+  }
+
+  disconnect(): void {
+    this.enabled = false;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close();
+    this.setStatus('offline');
   }
 
   send(message: ClientMessage): void {

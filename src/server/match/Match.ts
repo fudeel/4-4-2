@@ -17,6 +17,7 @@ import { TeamState, type Manager } from './model/TeamState';
 export interface TeamSetup {
   team: TeamProfile;
   squad: PlayerProfile[];
+  lineup?: Lineup;
 }
 
 export interface MatchSetup {
@@ -58,8 +59,8 @@ export class Match {
     setup: MatchSetup,
     private readonly deps: MatchDependencies,
   ) {
-    const createTeam = (side: Side, { team, squad }: TeamSetup) =>
-      new TeamState(side, team, squad, new CardDealer(deps.rng, side), deps.rules, LineupBuilder.best(DEFAULT_FORMATION, squad));
+    const createTeam = (side: Side, { team, squad, lineup }: TeamSetup) =>
+      new TeamState(side, team, squad, new CardDealer(deps.rng, side), deps.rules, lineup ? structuredClone(lineup) : LineupBuilder.best(DEFAULT_FORMATION, squad));
     this.state = new MatchState(setup.roomCode, deps.rules, {
       home: createTeam('home', setup.home),
       away: createTeam('away', setup.away),

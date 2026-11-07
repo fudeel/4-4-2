@@ -10,6 +10,7 @@ export class LobbyScreen implements Screen {
   readonly element: HTMLElement;
   private readonly code = h('div', { class: 'room-code' });
   private readonly managers = h('div', { class: 'managers' });
+  private readonly mode = h('p', { class: 'lobby__status' });
   private readonly readyButton: HTMLButtonElement;
   private readonly status = h('p', { class: 'lobby__status' });
   private readonly editor: LineupEditor;
@@ -26,7 +27,7 @@ export class LobbyScreen implements Screen {
         h('div', { class: 'lobby__room' }, h('small', null, 'ROOM'), this.code),
         h('button', { class: 'btn btn--ghost btn--small', onClick: () => this.share() }, '🔗 Share'),
       ),
-      this.managers,
+      this.mode, this.managers,
       h('section', { class: 'panel' }, h('h2', { class: 'panel__title' }, 'Your starting six'), this.editor.element),
       h('section', { class: 'panel' },
         h('h2', { class: 'panel__title' }, 'Mentality'),
@@ -45,6 +46,8 @@ export class LobbyScreen implements Screen {
     this.ready = mine.ready;
 
     setText(this.code, view.roomCode);
+    setText(this.mode, view.exhibition ? `${view.exhibition.pace === 'quick' ? 'Quick · 6 turns' : 'Classic · 18 turns'} · ${view.exhibition.fairPlay ? 'Fair play · balanced team strength' : 'Club strength · upgrades count'}` : 'Exhibition match');
+    this.code.title = view.exhibition ? `${view.exhibition.pace === 'quick' ? 'Quick · 6 turns' : 'Classic · 18 turns'} · ${view.exhibition.fairPlay ? 'Fair play: balanced team strength' : 'Club strength'} · ${view.exhibition.difficulty} AI` : 'Exhibition';
     render(this.managers, this.managerCard(view.teams.home, view.you === 'home'), h('span', { class: 'vs' }, 'VS'), this.managerCard(view.teams.away, view.you === 'away'));
     this.editor.update({ team: mine, mode: 'prematch', locked: mine.ready, maxSubstitutions: view.rules.maxSubstitutions });
     this.mentality.update(mine.mentality);
