@@ -1,9 +1,9 @@
 import type { ActionReport, MatchEvent } from '../../shared/model/match';
 
 export interface PlaybackListener {
-  onStart(report: ActionReport): void;
+  onStart(report: ActionReport, offsetMs: number): void;
   /** `instant` events were skipped (e.g. after a reconnect) and should update state without animation. */
-  onEvent(event: MatchEvent, index: number, report: ActionReport, instant: boolean): void;
+  onEvent(event: MatchEvent, index: number, report: ActionReport, instant: boolean, remainingMs: number): void;
   onComplete(report: ActionReport): void;
 }
 
@@ -31,16 +31,17 @@ export class ActionPlayback {
     this.cancel();
     this.report = report;
     this.played = -1;
-    this.listener.onStart(report);
+    offsetMs = Math.max(0, Math.min(offsetMs, report.durationMs));
+    this.listener.onStart(report, offsetMs);
 
     let at = 0;
     report.events.forEach((event, index) => {
       const delay = at - offsetMs;
-      if (delay < 0 && at + event.durationMs <= offsetMs) {
-        this.fire(event, index, true);
-      } else {
-        this.timers.push(window.setTimeout(() => this.fire(event, index, false), Math.max(0, delay)));
-      }
+      // Catch up completed events silently; keep the active overlay for only the
+      // time remaining. Even a fresh report normally arrives a few milliseconds late.
+      if (at + event.durationMs <= offsetMs) this.fire(event, index, true, 0);
+      else if (delay <= 0) this.fire(event, index, false, event.durationMs + delay);
+      else this.timers.push(window.setTimeout(() => this.fire(event, index, false), delay));
       at += event.durationMs;
     });
     this.timers.push(window.setTimeout(() => this.complete(), Math.max(0, at - offsetMs)));
@@ -61,10 +62,10 @@ export class ActionPlayback {
     this.played = -1;
   }
 
-  private fire(event: MatchEvent, index: number, instant: boolean): void {
+  private fire(event: MatchEvent, index: number, instant: boolean, remainingMs = event.durationMs): void {
     if (!this.report) return;
     this.played = Math.max(this.played, index);
-    this.listener.onEvent(event, index, this.report, instant);
+    this.listener.onEvent(event, index, this.report, instant, remainingMs);
   }
 
   private complete(): void {

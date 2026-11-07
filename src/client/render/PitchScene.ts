@@ -1,5 +1,5 @@
 import { ACESFilmicToneMapping, PCFSoftShadowMap, Scene, WebGLRenderer } from 'three';
-import type { ActionReport, MatchEvent, MatchView } from '../../shared/model/match';
+import type { ActionReport, MatchView } from '../../shared/model/match';
 import type { Sfx } from '../audio/Sfx';
 import { CameraRig } from './CameraRig';
 import { MatchDirector } from './MatchDirector';
@@ -43,16 +43,12 @@ export class PitchScene {
     this.director.sync(view, performance.now());
   }
 
-  beginAction(report: ActionReport): void {
-    this.director.beginAction(report);
-  }
-
-  playEvent(event: MatchEvent, index: number, report: ActionReport): void {
-    this.director.play(event, index, report);
+  beginAction(report: ActionReport, offsetMs: number): void {
+    this.director.beginAction(report, offsetMs, performance.now());
   }
 
   endAction(): void {
-    this.director.endAction();
+    this.director.endAction(performance.now());
   }
 
   destroy(): void {

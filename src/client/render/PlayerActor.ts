@@ -20,7 +20,7 @@ import { surname, type PlayerProfile } from '../../shared/model/player';
 import { lowPolyMaterial, merge, paint } from './lowpoly';
 import { createLabelTexture, createShadowTexture, createShirtNumberTexture } from './textures';
 
-export type Pose = 'stand' | 'fallen' | 'dive' | 'celebrate';
+export type Pose = 'stand' | 'fallen' | 'dive' | 'celebrate' | 'header' | 'kick' | 'throw' | 'tackle';
 
 export interface Kit {
   shirt: string;
@@ -116,6 +116,8 @@ export class PlayerActor {
   /** Top (sprint) speed in m/s; players jog at a fraction of it when there's no hurry. */
   private readonly speed: number;
   private readonly velocity = new Vector3();
+  private arrival: { from: Vector3; start: number; end: number } | null = null;
+  private readonly keeperKit: boolean;
 
   constructor(
     readonly profile: PlayerProfile,
@@ -123,6 +125,7 @@ export class PlayerActor {
     kit: Kit,
     teamColor: string,
   ) {
+    this.keeperKit = !!kit.gloves;
     this.seed = hashCode(profile.id);
     this.speed = 5.5 + profile.attributes.pace / 22;
     const skin = SKIN_TONES[this.seed % SKIN_TONES.length]!;
@@ -215,6 +218,10 @@ export class PlayerActor {
     return this.profile.id;
   }
 
+  get isKeeper(): boolean {
+    return this.keeperKit;
+  }
+
   get position(): Vector3 {
     return this.group.position;
   }
@@ -225,7 +232,27 @@ export class PlayerActor {
     return out.set(this.position.x + Math.sin(angle) * 0.6, 0, this.position.z + Math.cos(angle) * 0.6);
   }
 
+  hands(out = new Vector3()): Vector3 {
+    return this.feet(out).setY(0.95);
+  }
+
+  /** Keep short event choreography within the ground this player can actually cover. */
+  reachablePoint(point: Vector3, durationMs: number): Vector3 {
+    const delta = point.clone().sub(this.position).setY(0);
+    delta.clampLength(0, this.speed * Math.max(0, durationMs) / 1000 * 0.7);
+    return delta.add(this.position).setY(0);
+  }
+
+  /** A timed run to a reachable contact point; reception and flight share this deadline. */
+  arriveAt(point: Vector3, now: number, durationMs: number, holdMs = 250): void {
+    this.target.copy(point).setY(0);
+    this.arrival = { from: this.position.clone(), start: now, end: now + Math.max(1, durationMs) };
+    this.scriptedUntil = this.arrival.end + holdMs;
+    this.pose = 'stand';
+  }
+
   moveTo(point: Vector3, now: number, scriptedForMs = 0): void {
+    this.arrival = null;
     this.target.copy(point);
     this.target.y = 0;
     if (scriptedForMs > 0) this.scriptedUntil = Math.max(this.scriptedUntil, now + scriptedForMs);
@@ -237,6 +264,8 @@ export class PlayerActor {
   }
 
   teleport(point: Vector3): void {
+    this.arrival = null;
+    this.pose = 'stand';
     this.position.set(point.x, 0, point.z);
     this.target.copy(this.position);
     this.velocity.set(0, 0, 0);
@@ -274,8 +303,20 @@ export class PlayerActor {
     this.velocity.x += (ax - this.velocity.x) * blend;
     this.velocity.z += (az - this.velocity.z) * blend;
     if (this.pose === 'fallen') this.velocity.set(0, 0, 0);
-    this.position.x += this.velocity.x * dt;
-    this.position.z += this.velocity.z * dt;
+    if (this.arrival) {
+      const arrival = this.arrival;
+      const t = now >= arrival.end ? 1 : Math.max(0, (now - arrival.start) / (arrival.end - arrival.start));
+      const before = this.position.clone();
+      this.position.copy(arrival.from).lerp(this.target, t);
+      this.velocity.subVectors(this.position, before).divideScalar(Math.max(dt, 0.001));
+      if (t >= 1) {
+        this.arrival = null;
+        this.velocity.set(0, 0, 0);
+      }
+    } else {
+      this.position.x += this.velocity.x * dt;
+      this.position.z += this.velocity.z * dt;
+    }
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     this.moving += ((speed > 0.4 ? Math.min(1, speed / 6) : 0) - this.moving) * Math.min(1, dt * 8);
 
@@ -336,6 +377,27 @@ export class PlayerActor {
         this.elbows[0]!.rotation.x = this.elbows[1]!.rotation.x = -0.2;
         break;
       }
+      case 'header':
+        this.rig.position.y = Math.sin(Math.min(1, (now - this.poseStart) / 420) * Math.PI) * 0.3;
+        this.rig.rotation.x = 0.25 * Math.sin(t * Math.PI);
+        break;
+      case 'kick': {
+        const strike = Math.sin(Math.min(1, (now - this.poseStart) / 280) * Math.PI);
+        this.thighs[0]!.rotation.x = -strike;
+        this.knees[0]!.rotation.x = 0.15;
+        this.rig.rotation.x = -0.12 * strike;
+        break;
+      }
+      case 'tackle':
+        this.rig.rotation.x = -0.25 * t;
+        this.rig.position.y = -0.2 * t;
+        this.thighs[0]!.rotation.x = -1.2 * t;
+        this.knees[0]!.rotation.x = 0.1;
+        break;
+      case 'throw':
+        this.shoulders[0]!.rotation.x = this.shoulders[1]!.rotation.x = -1.6 * (1 - t);
+        this.elbows[0]!.rotation.x = this.elbows[1]!.rotation.x = -0.3;
+        break;
       default:
         break;
     }

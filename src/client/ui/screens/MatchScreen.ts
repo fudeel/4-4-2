@@ -38,8 +38,8 @@ export class MatchScreen implements Screen {
     this.fullTime = new FullTimeSheet(ctx.actions);
     this.ticker = new CommentaryTicker(() => this.openSheet(this.commentarySheet));
     this.playback = new ActionPlayback({
-      onStart: report => this.onActionStart(report),
-      onEvent: (event, index, report, instant) => this.onActionEvent(event, index, report, instant),
+      onStart: (report, offsetMs) => this.onActionStart(report, offsetMs),
+      onEvent: (event, _index, report, instant, remainingMs) => this.onActionEvent(event, report, instant, remainingMs),
       onComplete: () => this.onActionComplete(),
     });
     this.muteButton = h('button', { class: 'icon-btn', 'aria-label': 'Toggle sound', onClick: () => this.toggleMute() }, ctx.sfx.muted ? '🔇' : '🔊');
@@ -69,6 +69,8 @@ export class MatchScreen implements Screen {
     const view = state.view;
     if (!view) return;
     this.view = view;
+    // Finish the old presentation before applying the next phase/lineup.
+    if (view.phase !== 'resolving' && this.playback.isPlaying) this.playback.finish();
     this.scene.sync(view);
 
     const action = view.lastAction;
@@ -76,9 +78,7 @@ export class MatchScreen implements Screen {
       this.lastActionStarted = action.id;
       const remaining = (view.phaseEndsAt ?? 0) - this.ctx.store.serverNow();
       const elapsed = action.durationMs + view.rules.resolutionBufferMs - remaining;
-      this.playback.play(action, elapsed > 600 ? elapsed : 0);
-    } else if (view.phase !== 'resolving' && this.playback.isPlaying) {
-      this.playback.finish();
+      this.playback.play(action, Math.max(0, elapsed));
     }
     // Keep showing the action's minute until the next turn begins.
     if (view.phase !== 'resolving') this.liveMinute = null;
@@ -95,23 +95,22 @@ export class MatchScreen implements Screen {
 
   // ── Playback callbacks ─────────────────────────────────────────────────────
 
-  private onActionStart(report: ActionReport): void {
+  private onActionStart(report: ActionReport, offsetMs: number): void {
     this.goalShown = false;
     this.liveMinute = null;
-    this.scene.beginAction(report);
+    this.scene.beginAction(report, offsetMs);
   }
 
-  private onActionEvent(event: MatchEvent, index: number, report: ActionReport, instant: boolean): void {
+  private onActionEvent(event: MatchEvent, report: ActionReport, instant: boolean, remainingMs: number): void {
     if (event.kind !== 'cards') this.liveMinute = report.minute;
     if (event.kind === 'goal') this.goalShown = true;
     if (!instant && this.view) {
-      this.scene.playEvent(event, index, report);
-      if (event.kind === 'cards') this.overlays.showReveal(report, this.view, event.durationMs);
-      if (event.roll) this.overlays.showRoll(event.roll, this.view, event.durationMs);
-      if (event.kind === 'goal') this.overlays.showGoal(event, this.view, event.durationMs);
-      if (event.kind === 'counter') this.overlays.showBanner('⚡ Counter-attack!', this.view.teams[event.side].team.primaryColor, event.durationMs);
-      if (event.kind === 'offside') this.overlays.showBanner('🚩 Offside!', '#f2c230', event.durationMs);
-      if (event.kind === 'penalty') this.overlays.showBanner('⚠️ Penalty!', this.view.teams[event.side].team.primaryColor, event.durationMs);
+      if (event.kind === 'cards') this.overlays.showReveal(report, this.view, remainingMs);
+      if (event.roll) this.overlays.showRoll(event.roll, this.view, remainingMs);
+      if (event.kind === 'goal') this.overlays.showGoal(event, this.view, remainingMs);
+      if (event.kind === 'counter') this.overlays.showBanner('⚡ Counter-attack!', this.view.teams[event.side].team.primaryColor, remainingMs);
+      if (event.kind === 'offside') this.overlays.showBanner('🚩 Offside!', '#f2c230', remainingMs);
+      if (event.kind === 'penalty') this.overlays.showBanner('⚠️ Penalty!', this.view.teams[event.side].team.primaryColor, remainingMs);
       if (event.booking) this.overlays.showBooking(event, this.view);
     }
     this.render();
