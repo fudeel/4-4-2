@@ -28,6 +28,12 @@ export interface Kit {
 const SKIN_TONES = ['#f1c7a5', '#d9a47c', '#b07a52', '#8a5a3b', '#5e3b26', '#e6b993'];
 const HAIR_COLORS = ['#1c1410', '#3b2414', '#6b4423', '#c9a15b', '#111111', '#7a3b1d'];
 const SCALE = 1.35;
+/** Jogging speed as a fraction of a player's sprint speed. */
+const JOG_FACTOR = 0.55;
+/** Further than this from their spot (metres), players sprint back. */
+const SPRINT_DISTANCE = 7;
+/** How quickly players reach their desired speed (1/s). */
+const ACCELERATION = 5;
 
 /** Geometries are shared by every player to keep memory and draw setup low on phones. */
 const GEO = {
@@ -69,7 +75,9 @@ export class PlayerActor {
   private poseUntil = 0;
   private poseDirection = 1;
   private poseStart = 0;
+  /** Top (sprint) speed in m/s; players jog at a fraction of it when there's no hurry. */
   private readonly speed: number;
+  private readonly velocity = new Vector3();
 
   constructor(
     readonly profile: PlayerProfile,
@@ -168,6 +176,7 @@ export class PlayerActor {
   teleport(point: Vector3): void {
     this.position.set(point.x, 0, point.z);
     this.target.copy(this.position);
+    this.velocity.set(0, 0, 0);
   }
 
   setHighlighted(on: boolean): void {
@@ -189,18 +198,27 @@ export class PlayerActor {
     const dx = this.target.x - this.position.x;
     const dz = this.target.z - this.position.z;
     const distance = Math.hypot(dx, dz);
-    let speed = 0;
+    // Sprint when it matters (a scripted run, or far out of position); otherwise jog,
+    // easing in so players settle on their spot instead of overshooting it.
+    let desired = 0;
     if (this.pose !== 'fallen' && distance > 0.05) {
-      speed = Math.min(this.speed, distance * 3);
-      const step = Math.min(distance, speed * dt);
-      this.position.x += (dx / distance) * step;
-      this.position.z += (dz / distance) * step;
+      const urgent = now < this.scriptedUntil || distance > SPRINT_DISTANCE;
+      desired = Math.min(urgent ? this.speed : this.speed * JOG_FACTOR, distance * 2.2);
     }
-    this.moving += ((speed > 0.4 ? Math.min(1, speed / 5) : 0) - this.moving) * Math.min(1, dt * 8);
+    const ax = distance > 0.05 ? (dx / distance) * desired : 0;
+    const az = distance > 0.05 ? (dz / distance) * desired : 0;
+    const blend = 1 - Math.exp(-dt * ACCELERATION);
+    this.velocity.x += (ax - this.velocity.x) * blend;
+    this.velocity.z += (az - this.velocity.z) * blend;
+    if (this.pose === 'fallen') this.velocity.set(0, 0, 0);
+    this.position.x += this.velocity.x * dt;
+    this.position.z += this.velocity.z * dt;
+    const speed = Math.hypot(this.velocity.x, this.velocity.z);
+    this.moving += ((speed > 0.4 ? Math.min(1, speed / 6) : 0) - this.moving) * Math.min(1, dt * 8);
 
     // Face where we're running, otherwise watch the ball.
-    const faceX = this.moving > 0.2 ? dx : lookAt.x - this.position.x;
-    const faceZ = this.moving > 0.2 ? dz : lookAt.z - this.position.z;
+    const faceX = this.moving > 0.2 ? this.velocity.x : lookAt.x - this.position.x;
+    const faceZ = this.moving > 0.2 ? this.velocity.z : lookAt.z - this.position.z;
     if (Math.abs(faceX) + Math.abs(faceZ) > 0.01) {
       const desired = Math.atan2(faceX, faceZ);
       let delta = desired - this.group.rotation.y;
