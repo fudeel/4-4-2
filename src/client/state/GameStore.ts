@@ -3,8 +3,13 @@ import type { MatchView } from '../../shared/model/match';
 import type { OpponentKind } from '../../shared/protocol';
 import type { ConnectionStatus } from '../net/GameConnection';
 import type { AccountView } from '../../shared/model/account';
+import type { ClubView } from '../../shared/model/club';
 
 export interface ClientState {
+  club: ClubView | null;
+  clubReady: boolean;
+  clubBusy: boolean;
+  clubError: string;
   account: AccountView | null;
   authReady: boolean;
   authBusy: boolean;
@@ -18,6 +23,7 @@ export interface ClientState {
 
 /** Everything the UI can ask for. Screens depend on this interface, not on the network (DIP). */
 export interface GameActions {
+  createClub(name: string, shortName: string, color: string): void;
   signIn(username: string, password: string, register: boolean): void;
   signOut(): void;
   createRoom(opponent: OpponentKind): void;

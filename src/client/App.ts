@@ -12,8 +12,10 @@ import type { Screen, ScreenContext } from './ui/screens/Screen';
 import { AccountScreen } from './ui/screens/AccountScreen';
 import { managerRequest } from './net/ManagerClient';
 import type { AccountView } from '../shared/model/account';
+import type { ClubView } from '../shared/model/club';
+import { ClubCreateScreen } from './ui/screens/ClubCreateScreen';
 
-type ScreenKind = 'account' | 'home' | 'lobby' | 'match';
+type ScreenKind = 'account' | 'club' | 'home' | 'lobby' | 'match';
 
 /** Wires network ↔ store ↔ screens and switches screens as the match progresses. */
 export class App {
@@ -50,8 +52,15 @@ export class App {
     this.render(this.store.get());
     void managerRequest<{ account: AccountView | null }>('session').then(({ account }) => {
       this.store.patch({ account, authReady: true, playerName: account?.username ?? '' });
-      if (account) this.connection.connect();
+      if (account) { this.loadClub(); this.connection.connect(); }
     }).catch(() => this.store.patch({ authReady: true, authError: 'Cannot reach the game server. Reload to try again.' }));
+  }
+
+  private loadClub(): void {
+    const accountId = this.store.get().account?.id;
+    void managerRequest<{ club: ClubView | null }>('club').then(({ club }) => {
+      if (this.store.get().account?.id === accountId) this.store.patch({ club, clubReady: true });
+    }).catch(error => this.store.patch({ clubReady: true, clubError: error.message }));
   }
 
   private handle(message: ServerMessage): void {
@@ -79,10 +88,10 @@ export class App {
   }
 
   private render(state: ClientState): void {
-    const kind: ScreenKind = !state.account ? 'account' : !state.view ? 'home' : state.view.phase === 'lobby' ? 'lobby' : 'match';
+    const kind: ScreenKind = !state.account ? 'account' : !state.clubReady || !state.club ? 'club' : !state.view ? 'home' : state.view.phase === 'lobby' ? 'lobby' : 'match';
     if (kind !== this.screenKind) {
       this.screen?.destroy();
-      this.screen = kind === 'account' ? new AccountScreen(this.context) : kind === 'home' ? new HomeScreen(this.context) : kind === 'lobby' ? new LobbyScreen(this.context) : new MatchScreen(this.context);
+      this.screen = kind === 'account' ? new AccountScreen(this.context) : kind === 'club' ? new ClubCreateScreen(this.context) : kind === 'home' ? new HomeScreen(this.context) : kind === 'lobby' ? new LobbyScreen(this.context) : new MatchScreen(this.context);
       this.screenKind = kind;
       this.host.replaceChildren(this.screen.element);
     }
@@ -95,11 +104,17 @@ export class App {
   private createActions(): GameActions {
     const send = this.connection.send.bind(this.connection);
     return {
+      createClub: (name, shortName, color) => {
+        if (this.store.get().clubBusy) return;
+        this.store.patch({ clubBusy: true, clubError: '' });
+        void managerRequest<{ club: ClubView }>('club', { name, shortName, color }).then(({ club }) => this.store.patch({ club, clubReady: true })).catch(error => this.store.patch({ clubError: error.message })).finally(() => this.store.patch({ clubBusy: false }));
+      },
       signIn: (username, password, register) => {
         if (this.store.get().authBusy) return;
         this.store.patch({ authBusy: true, authError: '' });
         void managerRequest<{ account: AccountView }>(register ? 'register' : 'login', { username, password }).then(({ account }) => {
           this.store.patch({ account, playerName: account.username });
+          this.loadClub();
           this.connection.connect();
         }).catch(error => this.store.patch({ authError: String(error.message) })).finally(() => this.store.patch({ authBusy: false }));
       },
@@ -107,7 +122,7 @@ export class App {
         void managerRequest('logout', {}).then(() => {
           this.connection.disconnect();
           this.identity.roomCode = null;
-          this.store.patch({ account: null, view: null, authError: '' });
+          this.store.patch({ account: null, club: null, clubReady: false, view: null, authError: '' });
         }).catch(error => this.toaster.show(error.message, 'error'));
       },
       createRoom: opponent => send({ type: 'createRoom', opponent }),

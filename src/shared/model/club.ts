@@ -1,0 +1,29 @@
+import type { Lineup } from './lineup';
+import type { PlayerProfile } from './player';
+import type { TeamProfile } from './team';
+
+export interface ClubTransaction { id: string; at: number; label: string; amount: number }
+export interface PlayerDevelopment { xp: number; potential: number; sessions: number }
+export interface ClubView {
+  id: string;
+  ownerId: string;
+  team: TeamProfile;
+  squad: PlayerProfile[];
+  lineup: Lineup;
+  budget: number;
+  stadium: { name: string; level: number };
+  youthLevel: number;
+  trainingLevel: number;
+  fans: number;
+  reputation: number;
+  morale: number;
+  record: { played: number; wins: number; draws: number; losses: number; goalsFor: number; goalsAgainst: number };
+  form: ('W' | 'D' | 'L')[];
+  development: Record<string, PlayerDevelopment>;
+  ledger: ClubTransaction[];
+  createdAt: number;
+}
+
+export const STARTING_BUDGET = 100_000;
+export const money = (value: number): string => Math.round(value).toLocaleString('en-GB');
+export const stadiumCapacity = (level: number): number => 100 * level * level;

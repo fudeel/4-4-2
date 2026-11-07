@@ -13,6 +13,7 @@ import { createStaticHandler } from './net/StaticFiles';
 import { RoomRegistry } from './rooms/RoomRegistry';
 import { AccountService } from './accounts/AccountService';
 import { ManagerApi } from './net/ManagerApi';
+import { ClubService } from './clubs/ClubService';
 
 /* Composition root: the only place that knows concrete implementations. */
 
@@ -37,7 +38,8 @@ const registry = new RoomRegistry(
 );
 
 const accounts = new AccountService(resolve(process.env.ACCOUNTS_PATH ?? 'data/managers.json'));
-const api = new ManagerApi(accounts);
+const clubs = new ClubService(resolve(process.env.CLUBS_PATH ?? 'data/clubs.json'));
+const api = new ManagerApi(accounts, clubs);
 const staticHandler = createStaticHandler(resolve('dist/client'));
 const httpServer = createServer((req, res) => {
   if (req.url?.startsWith('/api/')) void api.handle(req, res);

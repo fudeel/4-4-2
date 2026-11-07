@@ -98,6 +98,20 @@ h1, h2, h3, p { margin: 0; }
 .account-screen h1 { margin: 20px 0 10px; font-size: clamp(24px, 5vw, 36px); }
 .account-screen small { color: var(--muted); line-height: 1.5; }
 .account-status { min-height: 24px; color: var(--warn); font-size: 14px; }
+.eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .16em; margin-bottom: 8px; }
+.muted { color: var(--muted); line-height: 1.5; }
+.club-overview { display: grid; gap: 14px; }
+.club-heading { display: flex; gap: 16px; align-items: center; padding: 8px 0; }
+.club-heading h1 { font-size: 26px; }
+.club-badge { width: 66px; height: 76px; clip-path: polygon(0 0,100% 0,100% 70%,50% 100%,0 70%); display: grid; place-items: center; font-weight: 900; color: white; text-shadow: 0 1px 3px #000; }
+.club-metrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.metric { display: grid; gap: 4px; }
+.metric strong { font-family: var(--font-num); font-size: 28px; }
+.metric span { color: var(--muted); font-size: 12px; }
+.club-color { padding: 8px; cursor: pointer; }
+.squad-list { display: grid; gap: 10px; margin-top: 12px; }
+.squad-player { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 5px; font-size: 13px; }
+.ledger-row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .divider { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
 .join-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }

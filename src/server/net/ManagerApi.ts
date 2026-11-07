@@ -1,9 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AccountService, ApiError, SESSION_COOKIE } from '../accounts/AccountService';
+import type { ClubService } from '../clubs/ClubService';
 
 export class ManagerApi {
   private readonly attempts = new Map<string, { count: number; until: number }>();
-  constructor(readonly accounts: AccountService) {}
+  constructor(readonly accounts: AccountService, readonly clubs?: ClubService) {}
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.setHeader('Cache-Control', 'no-store');
@@ -12,9 +13,20 @@ export class ManagerApi {
     try {
       const path = new URL(req.url ?? '/', 'http://localhost').pathname;
       if (req.method === 'GET' && path === '/api/session') return this.json(res, 200, { account: this.accounts.authenticateCookie(req.headers.cookie) });
+      if (req.method === 'GET' && path === '/api/club' && this.clubs) {
+        const account = this.accounts.authenticateCookie(req.headers.cookie);
+        if (!account) throw new ApiError(401, 'Please sign in.');
+        return this.json(res, 200, { club: this.clubs.findOwner(account.id) });
+      }
       if (req.method !== 'POST') throw new ApiError(405, 'Method not allowed.');
       if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) throw new ApiError(403, 'Open this page on the game server to continue.');
       if (!req.headers['content-type']?.startsWith('application/json')) throw new ApiError(415, 'Send JSON data.');
+      if (path === '/api/club' && this.clubs) {
+        const account = this.accounts.authenticateCookie(req.headers.cookie);
+        if (!account) throw new ApiError(401, 'Please sign in.');
+        const data = await this.body(req);
+        return this.json(res, 201, { club: this.clubs.create(account.id, data.name, data.shortName, data.color) });
+      }
       if (path === '/api/logout') {
         this.accounts.logout(req.headers.cookie);
         res.setHeader('Set-Cookie', this.cookie('', req, 0));

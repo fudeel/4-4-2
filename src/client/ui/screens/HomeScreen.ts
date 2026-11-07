@@ -1,7 +1,9 @@
 import { CARD_DEFINITIONS, CARD_IDS } from '../../../shared/model/cards';
 import { DEFAULT_RULES, totalTurns, turnsPerHalf } from '../../../shared/rules';
 import type { ClientState } from '../../state/GameStore';
-import { h } from '../dom';
+import { h, render } from '../dom';
+import { money, stadiumCapacity, type ClubView } from '../../../shared/model/club';
+import { ATTRIBUTE_LABELS, overallRating } from '../../../shared/model/player';
 import { TIMING_LABEL } from '../format';
 import type { Screen, ScreenContext } from './Screen';
 
@@ -10,6 +12,8 @@ export class HomeScreen implements Screen {
   readonly element: HTMLElement;
   private readonly buttons: HTMLButtonElement[] = [];
   private readonly codeInput: HTMLInputElement;
+  private readonly clubPanel = h('section', { class: 'club-overview' });
+  private lastClub: ClubView | null = null;
 
   constructor(private readonly ctx: ScreenContext) {
     const { actions } = ctx;
@@ -31,6 +35,7 @@ export class HomeScreen implements Screen {
         h('div', { class: 'logo' }, h('span', null, '4'), h('i', null, '-'), h('span', null, '4'), h('i', null, '-'), h('span', null, '2')),
         h('p', { class: 'home__tagline' }, 'Turn-based 6-a-side football. Pick your shape, play your cards, roll the dice.'),
       ),
+      this.clubPanel,
       h('section', { class: 'panel home__panel' },
         h('p', null, `Manager ${ctx.store.get().account?.username ?? ''}`),
         h('button', { class: 'btn btn--ghost', onClick: () => actions.signOut() }, 'Sign out'),
@@ -66,6 +71,24 @@ export class HomeScreen implements Screen {
   }
 
   update(state: ClientState): void {
+    if (state.club && state.club !== this.lastClub) {
+      this.lastClub = state.club;
+      const club = state.club;
+      render(this.clubPanel,
+        h('div', { class: 'club-heading' }, h('div', { class: 'club-badge', style: { background: club.team.primaryColor } }, club.team.shortName), h('div', null, h('p', { class: 'eyebrow' }, 'YOUR CLUB'), h('h1', null, club.team.name))),
+        h('div', { class: 'club-metrics' }, ...[[money(club.budget), 'Credits'], [String(club.fans), 'Fans'], [String(club.record.played), 'Matches'], [String(club.morale), 'Morale']].map(([value, label]) => h('div', { class: 'panel metric' }, h('strong', null, value), h('span', null, label)))),
+        h('section', { class: 'panel home__panel' }, h('h2', { class: 'panel__title' }, 'Your foundations'),
+          h('p', null, `🏟 ${club.stadium.name} · Level ${club.stadium.level} · ${stadiumCapacity(club.stadium.level)} capacity`),
+          h('p', null, `⚽ Training ground · Level ${club.trainingLevel}`), h('p', null, club.youthLevel ? `🌱 Youth academy · Level ${club.youthLevel}` : '🌱 Youth academy · Not built'),
+          h('p', { class: 'muted' }, `Record: ${club.record.wins}W ${club.record.draws}D ${club.record.losses}L · Reputation ${club.reputation}`)),
+        h('details', { class: 'panel' }, h('summary', null, `Your squad · ${club.squad.length} players`),
+          h('div', { class: 'squad-list' }, ...club.squad.map(p => h('div', { class: 'squad-player' },
+            h('div', null, h('strong', null, `${p.number}. ${p.name}`), h('span', { class: 'muted' }, ` ${p.position} · ${p.age} years · OVR ${Math.round(overallRating(p))}`)),
+            h('small', { class: 'muted' }, Object.entries(p.attributes).map(([key, value]) => `${ATTRIBUTE_LABELS[key as keyof typeof ATTRIBUTE_LABELS]} ${value}`).join(' · '))))),
+        ),
+        h('details', { class: 'panel' }, h('summary', null, 'Club ledger'), ...club.ledger.slice().reverse().map(t => h('div', { class: 'ledger-row' }, h('span', null, t.label), h('strong', null, `${t.amount > 0 ? '+' : ''}${money(t.amount)}`)))),
+      );
+    }
     const offline = state.connection !== 'online';
     for (const btn of this.buttons) btn.disabled = offline;
   }
