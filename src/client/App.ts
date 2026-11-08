@@ -16,6 +16,7 @@ import type { ClubView } from '../shared/model/club';
 import { ClubCreateScreen } from './ui/screens/ClubCreateScreen';
 import type { NightView } from '../shared/model/night';
 import { NightScreen } from './ui/screens/NightScreen';
+import { GameViewport } from './ui/GameViewport';
 
 type ScreenKind = 'account' | 'club' | 'home' | 'night' | 'lobby' | 'match';
 
@@ -27,6 +28,7 @@ export class App {
   private readonly host = h('div', { class: 'screen-host' });
   private readonly connectionBadge = h('div', { class: 'conn-badge' });
   private readonly context: ScreenContext;
+  private readonly viewport = new GameViewport();
   private pendingNight = new URLSearchParams(location.search).get('night');
 
   constructor(
@@ -40,7 +42,8 @@ export class App {
   }
 
   start(): void {
-    this.root.append(this.host, this.toaster.element, this.connectionBadge);
+    this.viewport.frame.append(this.host, this.toaster.element, this.connectionBadge);
+    this.root.append(this.viewport.element);
     this.connection.onOpen(() => this.connection.send({ type: 'hello', clientId: this.identity.clientId, name: this.identity.name }));
     this.connection.onStatus(connection => {
       this.store.patch({ connection });

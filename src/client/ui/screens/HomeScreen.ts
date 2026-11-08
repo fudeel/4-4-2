@@ -1,134 +1,128 @@
 import { CARD_DEFINITIONS, CARD_IDS } from '../../../shared/model/cards';
-import { DEFAULT_RULES, totalTurns, turnsPerHalf } from '../../../shared/rules';
-import type { ClientState } from '../../state/GameStore';
-import { h, render } from '../dom';
 import { money, stadiumCapacity, type ClubView } from '../../../shared/model/club';
-import { ATTRIBUTE_LABELS, overallRating } from '../../../shared/model/player';
 import type { ExhibitionOptions } from '../../../shared/model/exhibition';
-import { ProgressionPanel } from '../components/ProgressionPanel';
+import type { ClientState } from '../../state/GameStore';
 import { ClubSquadPanel } from '../components/ClubSquadPanel';
-import { TIMING_LABEL } from '../format';
+import { ProgressionPanel } from '../components/ProgressionPanel';
+import { cardView } from '../match/CardView';
+import { h, render, setText } from '../dom';
+import { ART, artImage, footballerCard, gameTile, wordmark } from '../football';
 import type { Screen, ScreenContext } from './Screen';
 
-/** Landing page: name, create/join a room, practice vs AI, rules. */
+type Menu = 'play' | 'exhibition' | 'squad' | 'club' | 'develop' | 'rules';
+const TABS = [{ id: 'play', name: 'Play' }, { id: 'squad', name: 'Squad' }, { id: 'club', name: 'My club' }, { id: 'develop', name: 'Develop' }, { id: 'rules', name: 'How to play' }] as const;
+
+/** A console-style football hub. Each section owns its scroll area inside the 16:9 surface. */
 export class HomeScreen implements Screen {
   readonly element: HTMLElement;
-  private readonly buttons: HTMLButtonElement[] = [];
-  private readonly codeInput: HTMLInputElement;
-  private readonly clubPanel = h('section', { class: 'club-overview' });
-  private lastClub: ClubView | null = null;
-  private readonly progression: ProgressionPanel;
+  private menu: Menu = 'play';
+  private readonly panes = new Map<Menu, HTMLElement>();
+  private readonly tabs = new Map<string, HTMLButtonElement>();
+  private readonly wallet = h('strong');
+  private readonly name = h('strong');
+  private readonly badge = h('span', { class: 'header-crest' });
+  private readonly connection = h('span', { class: 'game-connection' });
+  private readonly clubBody = h('div', { class: 'club-room' });
+  private readonly roster = h('div', { class: 'squad-gallery' });
   private readonly squad: ClubSquadPanel;
+  private readonly progression: ProgressionPanel;
+  private readonly gameButtons: HTMLButtonElement[] = [];
+  private lastClub: ClubView | null = null;
+  private selectedPlayer: string | null = null;
   private readonly pace = h('select', { class: 'input', 'aria-label': 'Exhibition length' }, h('option', { value: 'quick' }, 'Quick · 6 turns'), h('option', { value: 'classic' }, 'Classic · 18 turns'));
-  private readonly difficulty = h('select', { class: 'input', 'aria-label': 'AI difficulty' }, h('option', { value: 'casual' }, 'AI · Casual'), h('option', { value: 'balanced', selected: true }, 'AI · Balanced'), h('option', { value: 'challenging' }, 'AI · Challenging'));
+  private readonly difficulty = h('select', { class: 'input', 'aria-label': 'AI difficulty' }, h('option', { value: 'casual' }, 'Casual AI'), h('option', { value: 'balanced', selected: true }, 'Balanced AI'), h('option', { value: 'challenging' }, 'Challenging AI'));
   private readonly fairPlay = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Fair play' });
+  private readonly code: HTMLInputElement;
 
   constructor(private readonly ctx: ScreenContext) {
-    const { actions } = ctx;
-    this.progression = new ProgressionPanel(ctx);
     this.squad = new ClubSquadPanel(ctx);
-    this.progression.element.id = 'development';
-    this.codeInput = h('input', {
-      class: 'input input--code', maxlength: 4, placeholder: 'CODE', 'aria-label': 'Room code', autocapitalize: 'characters',
-      onInput: () => { this.codeInput.value = this.codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); },
-      onKeydown: (e: KeyboardEvent) => { if (e.key === 'Enter') this.join(); },
-    });
-
-    const button = (label: string, cls: string, onClick: () => void) => {
-      const btn = h('button', { class: `btn ${cls}`, onClick }, label);
-      this.buttons.push(btn);
-      return btn;
+    this.progression = new ProgressionPanel(ctx);
+    this.code = h('input', { class: 'input input--code', maxlength: 4, minlength: 4, required: true, pattern: '[A-Z0-9]{4}', placeholder: 'CODE', 'aria-label': 'Room code', autocapitalize: 'characters', onInput: () => { this.code.value = this.code.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); } });
+    const nav = h('nav', { class: 'game-tabs', role: 'tablist', 'aria-label': 'Club navigation', onKeydown: (e: KeyboardEvent) => this.navigate(e) });
+    for (const [index, tab] of TABS.entries()) {
+      const button = h('button', { role: 'tab', id: `tab-${tab.id}`, 'aria-controls': `pane-${tab.id}`, onClick: () => this.show(tab.id) }, h('small', null, `0${index + 1}`), tab.name);
+      this.tabs.set(tab.id, button); nav.append(button);
+    }
+    const play = h('section', { class: 'play-grid' },
+      gameTile({ image: ART.match, tone: 'cyan', label: 'THE PITCH IS CALLING', title: 'PLAY\nYOUR WAY.', text: 'Six players. One game plan. Everything to play for.', action: 'Kick off', hero: true, onClick: () => this.show('exhibition') }),
+      gameTile({ image: ART.night, tone: 'pink', label: '2–8 MANAGERS · ONE TROPHY', title: 'FRIENDS NIGHT', text: 'Bring the group. Take the bragging rights.', action: 'Get the night started', onClick: () => ctx.actions.openNight() }),
+      gameTile({ image: ART.match, tone: 'lime', label: 'BUILD YOUR STARTING VI', title: 'YOUR SQUAD', text: 'Find your shape. Back your players.', action: 'Team management', onClick: () => this.show('squad') }),
+      gameTile({ image: ART.stadium, tone: 'orange', label: 'FROM LOCAL TO LEGEND', title: 'LEVEL UP', text: 'Better players. Bigger nights.', action: 'Club development', onClick: () => this.show('develop') }));
+    const create = (kind: 'human' | 'bot', label: string, text: string, tone: string) => {
+      const button = gameTile({ image: kind === 'human' ? ART.night : ART.match, tone, label: kind === 'human' ? 'HEAD TO HEAD' : 'TAKE ON THE AI', title: label, text, action: kind === 'human' ? 'Create a room' : 'Start practice', onClick: () => this.create(kind) });
+      this.gameButtons.push(button); return button;
     };
-
-    const half = turnsPerHalf(DEFAULT_RULES);
-    this.element = h('main', { class: 'home home--club' },
-      h('header', { class: 'home__hero' },
-        h('div', { class: 'logo' }, h('span', null, '4'), h('i', null, '-'), h('span', null, '4'), h('i', null, '-'), h('span', null, '2')),
-        h('p', { class: 'home__tagline' }, 'A small club. A big night. Your story starts here.'),
-      ),
-      h('nav', { class: 'club-nav', 'aria-label': 'Club navigation' }, h('a', { href: '#exhibitions' }, 'Play'), h('a', { href: '#development' }, 'Develop'), h('button', { onClick: () => actions.openNight() }, 'Friends night'), h('span', null, ctx.store.get().account?.username), h('button', { onClick: () => actions.signOut() }, 'Sign out')),
-      this.clubPanel,
-      h('section', { class: 'panel home__panel exhibition-panel', id: 'exhibitions' },
-        h('h2', { class: 'panel__title' }, 'Exhibition match'),
-        this.pace, this.difficulty,
-        h('label', { class: 'fair-play' }, this.fairPlay, ' Fair play · balance team strength for a close game'),
-        button('⚔️  Play a friend', 'btn--primary btn--block', () => this.create('human')),
-        button('🤖  Practice vs AI', 'btn--ghost btn--block', () => this.create('bot')),
-        h('div', { class: 'divider' }, h('span', null, 'or join a room')),
-        h('div', { class: 'join-row' }, this.codeInput, button('Join', 'btn--primary', () => this.join())),
-      ),
-      h('button', { class: 'night-launch', onClick: () => actions.openNight() }, h('small', null, 'THE GROUP CHAT MEETS THE PITCH'), h('strong', null, 'Make it a friends night →'), h('span', null, '2–8 managers · Quick matches · Shared table · Trophies')),
-      this.squad.element,
-      h('details', { class: 'panel rules' },
-        h('summary', null, '📖 How to play'),
-        h('ul', null,
-          h('li', null, `Two managers, 6 players each. Quick matches have 6 turns (30 in-game minutes). Classic matches have ${totalTurns(DEFAULT_RULES)} turns (${half} per half, 90 minutes). Each turn covers ${DEFAULT_RULES.minutesPerTurn} minutes.`),
-          h('li', null, 'Possession alternates: one team attacks, the other defends. Each attack is a chain of dice rolls — build-up, chance creation, shot — whose odds come from the stats, fatigue and positions of the players involved.'),
-          h('li', null, `Both managers secretly play one card or skip within 12s (quick) or ${DEFAULT_RULES.planningSeconds}s (classic). Cards are revealed together. Hold up to ${DEFAULT_RULES.handLimit}; draw one every ${DEFAULT_RULES.drawEveryTurns} turns.`),
-          h('li', null, `Players tire. At half-time (15s quick, ${DEFAULT_RULES.halfTimeSeconds}s classic), change formation and make up to ${DEFAULT_RULES.maxSubstitutions} substitutions.`),
-          h('li', null, 'Winning the ball cleanly in midfield springs a counter-attack. Momentum swings with every duel won.'),
-        ),
-        h('div', { class: 'rules__cards' },
-          CARD_IDS.map(id => {
-            const card = CARD_DEFINITIONS[id];
-            return h('div', { class: `rule-card rule-card--${card.rarity}` },
-              h('span', { class: 'rule-card__icon' }, card.icon),
-              h('div', null,
-                h('strong', null, card.name, ' ', h('em', { class: `timing timing--${card.timing}` }, TIMING_LABEL[card.timing])),
-                h('p', null, card.description),
-              ),
-            );
-          }),
-        ),
-      ),
-      this.progression.element,
-      h('footer', { class: 'home__footer' }, 'Friends join with their own accounts. Use a different browser or a private window for a second manager on this computer.'),
-    );
+    const join = h('button', { class: 'btn btn--primary', type: 'submit' }, 'Join match →'); this.gameButtons.push(join);
+    const exhibition = h('section', { class: 'exhibition-room' },
+      h('div', { class: 'section-heading' }, h('button', { class: 'btn btn--ghost btn--small', onClick: () => this.show('play') }, '← Back'), h('h1', null, 'KICK OFF')),
+      h('div', { class: 'exhibition-tiles' }, create('human', 'PLAY A FRIEND', 'Your club versus theirs. Settle it on the pitch.', 'pink'), create('bot', 'PRACTICE', 'Try a new shape. Test your next big idea.', 'cyan')),
+      h('div', { class: 'match-settings' }, h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'Match length'), this.pace), h('label', { class: 'field' }, h('span', { class: 'field__label' }, 'AI difficulty'), this.difficulty), h('label', { class: 'fair-play' }, this.fairPlay, 'Fair play · balance team strength')),
+      h('form', { class: 'room-join', onSubmit: (e: SubmitEvent) => { e.preventDefault(); ctx.actions.joinRoom(this.code.value); } }, h('div', null, h('strong', null, 'GOT AN INVITATION?'), h('small', null, 'Enter the four-character match code.')), this.code, join));
+    this.addPane('play', play); this.addPane('exhibition', exhibition);
+    this.addPane('squad', h('section', { class: 'squad-room' }, this.squad.element, h('section', { class: 'squad-collection' }, h('div', { class: 'section-heading' }, h('h2', null, 'THE CLUB'), h('small', null, 'Your players · your colours')), this.roster)));
+    this.addPane('club', this.clubBody); this.addPane('develop', this.progression.element);
+    this.addPane('rules', h('section', { class: 'game-rules scroll-area' },
+      h('div', { class: 'section-heading' }, h('h1', null, 'KNOW THE GAME'), h('small', null, 'Outthink the other touchline.')),
+      h('div', { class: 'rules-steps' }, ...[
+        ['01', 'PICK YOUR SIX', 'Pick a shape and a starting six. Players in their natural positions perform better.'],
+        ['02', 'MAKE YOUR MOVE', 'Secretly play a card or skip. Attack and defence alternate. Both cards reveal together.'],
+        ['03', 'WIN THE DUELS', 'Build-up → chance → shot. Skills, stamina, cards and momentum shape every roll.'],
+        ['04', 'CHANGE THE GAME', 'Move the mentality slider. Use half-time for formation changes and up to three substitutions.'],
+      ].map(([number, title, text]) => h('article', null, h('b', null, number), h('h2', null, title), h('p', null, text)))),
+      h('p', { class: 'muted' }, 'Quick: 6 turns, 12-second planning, 15-second half-time. Classic: 18 turns, 20-second planning, 45-second half-time.'),
+      h('h2', null, 'YOUR PLAYBOOK'), h('div', { class: 'playbook' }, ...CARD_IDS.map(id => cardView(CARD_DEFINITIONS[id])))));
+    const content = h('div', { class: 'game-home__content' }, ...this.panes.values());
+    this.element = h('main', { class: 'game-home' },
+      h('header', { class: 'game-header' }, wordmark(), h('div', { class: 'game-club-id' }, this.badge, h('div', null, h('small', null, 'YOUR CLUB'), this.name)),
+        h('div', { class: 'game-wallet' }, h('span', { 'aria-hidden': 'true' }, '◈'), h('div', null, h('small', null, 'CLUB CREDITS'), this.wallet)),
+        h('button', { class: 'game-account', onClick: () => ctx.actions.signOut(), title: 'Sign out' }, h('span', null, ctx.store.get().account?.username ?? 'Manager'), h('small', null, 'SIGN OUT ↗'))),
+      nav, content,
+      h('footer', { class: 'game-footer' }, h('span', null, h('b', null, '↵'), ' Select', h('b', null, '← →'), ' Switch tabs'), h('span', { class: 'game-footer__slogan' }, 'SMALL SIDES. BIG MOMENTS.'), this.connection));
+    this.show('play');
   }
-
   update(state: ClientState): void {
-    this.progression.update(state);
-    this.squad.update(state);
-    if (state.club && state.club !== this.lastClub) {
-      this.lastClub = state.club;
-      const club = state.club;
-      render(this.clubPanel,
-        h('div', { class: 'club-heading' }, h('div', { class: 'club-badge', style: { background: club.team.primaryColor } }, club.team.shortName), h('div', null, h('p', { class: 'eyebrow' }, 'YOUR CLUB'), h('h1', null, club.team.name))),
-        h('div', { class: 'club-metrics' }, ...[[money(club.budget), 'Credits'], [String(club.fans), 'Fans'], [String(club.record.played), 'Matches'], [String(club.morale), 'Morale']].map(([value, label]) => h('div', { class: 'panel metric' }, h('strong', null, value), h('span', null, label)))),
-        h('section', { class: 'panel home__panel' }, h('h2', { class: 'panel__title' }, 'Your foundations'),
-          h('p', null, `🏟 ${club.stadium.name} · Level ${club.stadium.level} · ${stadiumCapacity(club.stadium.level)} capacity`),
-          h('p', null, `⚽ Training ground · Level ${club.trainingLevel}`), h('p', null, club.youthLevel ? `🌱 Youth academy · Level ${club.youthLevel}` : '🌱 Youth academy · Not built'),
-          h('p', { class: 'muted' }, `Record: ${club.record.wins}W ${club.record.draws}D ${club.record.losses}L · Reputation ${club.reputation}`)),
-        h('details', { class: 'panel' }, h('summary', null, `Your squad · ${club.squad.length} players`),
-          h('div', { class: 'squad-list' }, ...club.squad.map(p => h('div', { class: 'squad-player' },
-            h('div', null, h('strong', null, `${p.number}. ${p.name}`), h('span', { class: 'muted' }, ` ${p.position} · ${p.age} years · OVR ${Math.round(overallRating(p))}`)),
-            h('small', { class: 'muted' }, Object.entries(p.attributes).map(([key, value]) => `${ATTRIBUTE_LABELS[key as keyof typeof ATTRIBUTE_LABELS]} ${value}`).join(' · '))))),
-        ),
-        h('details', { class: 'panel' }, h('summary', null, 'Club ledger'), ...club.ledger.slice().reverse().map(t => h('div', { class: 'ledger-row' }, h('span', null, t.label), h('strong', null, `${t.amount > 0 ? '+' : ''}${money(t.amount)}`)))),
-        club.history.length ? h('section', { class: 'panel' }, h('h2', { class: 'panel__title' }, 'Recent exhibitions'), ...club.history.slice(-5).reverse().map(m => h('div', { class: 'ledger-row' }, h('span', null, `${m.result} · ${m.opponent}`), h('strong', null, `${m.goalsFor}–${m.goalsAgainst}`)))) : null,
-        h('section', { class: 'panel home__panel' }, h('h2', { class: 'panel__title' }, 'Club milestones'),
-          h('div', { class: 'milestones' }, ...[[club.record.played > 0, 'First whistle'], [club.record.wins > 0, 'First victory'], [club.fans >= 100, 'A hundred voices'], [club.squad.some(p => p.age < 20), 'Homegrown talent'], [club.trophies.some(t => t.rank === 1), 'Night champions']].map(([done, label]) => h('span', { class: done ? 'milestone milestone--done' : 'milestone' }, `${done ? '✓' : '○'} ${label}`))),
-          club.trophies.length ? h('div', { class: 'trophy-cabinet' }, ...club.trophies.slice(-5).reverse().map(t => h('p', null, `${t.rank === 1 ? '🏆' : t.rank === 2 ? '🥈' : '🥉'} ${t.name} · Place ${t.rank}`))) : h('p', { class: 'muted' }, 'Your first trophy is a friends night away.')),
-      );
+    const club = state.club;
+    if (club) {
+      setText(this.name, club.team.name); setText(this.wallet, money(club.budget)); setText(this.badge, club.team.shortName); this.badge.style.background = club.team.primaryColor;
+      if (this.lastClub !== club) { this.lastClub = club; this.drawClub(club); this.drawRoster(club); }
+      this.squad.update(state); this.progression.update(state);
     }
-    const offline = state.connection !== 'online';
-    for (const btn of this.buttons) btn.disabled = offline;
+    for (const button of this.gameButtons) button.disabled = state.connection !== 'online';
+    setText(this.connection, state.connection === 'online' ? '● ONLINE' : '● CONNECTING');
+    this.connection.dataset.online = String(state.connection === 'online');
   }
-
-  destroy(): void {
-    // Nothing to clean up.
+  destroy(): void {}
+  private addPane(menu: Menu, content: HTMLElement): void {
+    const pane = h('div', { class: `game-pane game-pane--${menu}`, id: `pane-${menu}`, role: 'tabpanel', 'aria-labelledby': `tab-${menu === 'exhibition' ? 'play' : menu}`, hidden: true }, content);
+    this.panes.set(menu, pane);
   }
-
-  private create(opponent: 'human' | 'bot'): void {
-    this.ctx.actions.createRoom(opponent, { pace: this.pace.value as ExhibitionOptions['pace'], fairPlay: this.fairPlay.checked, difficulty: this.difficulty.value as ExhibitionOptions['difficulty'] });
+  private show(menu: Menu): void {
+    this.menu = menu;
+    for (const [id, pane] of this.panes) pane.hidden = id !== menu;
+    for (const [id, button] of this.tabs) { const selected = id === (menu === 'exhibition' ? 'play' : menu); button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; }
   }
-
-  private join(): void {
-    const code = this.codeInput.value.trim();
-    if (code.length < 4) {
-      this.ctx.toaster.show('Enter the 4-character room code.', 'error');
-      return;
-    }
-    this.ctx.actions.joinRoom(code);
+  private navigate(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const current = Math.max(0, TABS.findIndex(t => t.id === this.menu || (this.menu === 'exhibition' && t.id === 'play')));
+    const index = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+    this.show(TABS[index]!.id); this.tabs.get(TABS[index]!.id)?.focus();
+  }
+  private create(opponent: 'human' | 'bot'): void { this.ctx.actions.createRoom(opponent, { pace: this.pace.value as ExhibitionOptions['pace'], difficulty: this.difficulty.value as ExhibitionOptions['difficulty'], fairPlay: this.fairPlay.checked }); }
+  private drawRoster(club: ClubView): void {
+    render(this.roster, ...club.squad.map(player => footballerCard(player, player.position === 'GK' ? club.team.goalkeeperColor : club.team.primaryColor, this.selectedPlayer === player.id, () => { this.selectedPlayer = this.selectedPlayer === player.id ? null : player.id; this.drawRoster(club); })));
+  }
+  private drawClub(club: ClubView): void {
+    render(this.clubBody,
+      h('article', { class: 'stadium-feature' }, artImage(ART.stadium), h('div', null, h('p', { class: 'eyebrow' }, 'THIS IS HOME'), h('h1', null, club.stadium.name), h('span', { class: 'level-stamp' }, `LEVEL ${club.stadium.level}`),
+        h('div', { class: 'stadium-numbers' }, h('span', null, h('b', null, stadiumCapacity(club.stadium.level)), ' CAPACITY'), h('span', null, h('b', null, club.fans), ' FANS'), h('span', null, h('b', null, club.morale), ' MORALE')),
+        h('button', { class: 'btn btn--primary', onClick: () => this.show('develop') }, 'Build your legacy →'))),
+      h('section', { class: 'club-story scroll-area' }, h('p', { class: 'eyebrow' }, 'THE STORY SO FAR'), h('h2', null, 'YOUR COLOURS.\nYOUR CLUB.'),
+        h('div', { class: 'club-record' }, ...[[club.record.played, 'PLAYED'], [club.record.wins, 'WON'], [club.record.draws, 'DRAWN'], [club.record.losses, 'LOST']].map(([value, label]) => h('div', null, h('strong', null, value), h('small', null, label)))),
+        h('div', { class: 'form-guide' }, h('small', null, 'RECENT FORM'), ...club.form.map(result => h('b', { class: `form-guide--${result}` }, result))),
+        h('h3', null, 'TROPHY CABINET'), club.trophies.length ? h('div', { class: 'trophy-cabinet' }, ...club.trophies.slice(-5).reverse().map(t => h('p', null, `${t.rank === 1 ? '🏆' : t.rank === 2 ? '🥈' : '🥉'} ${t.name} · Place ${t.rank}`))) : h('p', { class: 'muted' }, 'An empty shelf. A whole lot of possibility. Win your first friends night.'),
+        h('button', { class: 'btn btn--pink', onClick: () => this.ctx.actions.openNight() }, 'Chase your first trophy →'),
+        h('details', { class: 'club-ledger' }, h('summary', null, 'Club credits & history'), ...club.ledger.slice(-15).reverse().map(t => h('div', { class: 'ledger-row' }, h('span', null, t.label), h('strong', null, `${t.amount > 0 ? '+' : ''}${money(t.amount)}`)))),
+        h('h3', null, 'LAST TIME OUT'), club.history.length ? h('div', null, ...club.history.slice(-5).reverse().map(m => h('div', { class: 'result-row' }, h('b', { class: `form-guide--${m.result}` }, m.result), h('span', null, m.opponent), h('strong', null, `${m.goalsFor}–${m.goalsAgainst}`)))) : h('p', { class: 'muted' }, 'Your first match is waiting.')));
   }
 }
