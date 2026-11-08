@@ -4,6 +4,7 @@ import { GameConnection } from './net/GameConnection';
 import { Identity } from './net/Identity';
 import { GameStore } from './state/GameStore';
 import './styles/main.css';
+import './styles/football.css';
 
 const identity = new Identity();
 const store = new GameStore({ night: null, nightOpen: false, nightBusy: false, nightError: '', club: null, clubReady: false, clubBusy: false, clubError: '', account: null, authReady: false, authBusy: false, authError: '', connection: 'offline', view: null, clockOffset: 0, playerName: identity.name });

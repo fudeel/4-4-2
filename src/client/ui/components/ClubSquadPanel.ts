@@ -18,8 +18,8 @@ export class ClubSquadPanel {
   constructor(ctx: ScreenContext) {
     this.editor = new LineupEditor({ onChange: lineup => ctx.actions.saveClubLineup(lineup) });
     this.auto = h('button', { class: 'btn btn--ghost btn--block', onClick: () => { const c = ctx.store.get().club; if (c) ctx.actions.saveClubLineup(LineupBuilder.best(c.lineup.formationId, c.squad)); } }, 'Pick my strongest six');
-    this.element = h('details', { class: 'panel club-squad' }, h('summary', null, 'Manage your starting six'),
-      h('p', { class: 'muted' }, 'Your saved lineup travels with your club. Tap two players to swap them, or choose a bench player. Change formation to suit your squad.'), this.editor.element, this.auto);
+    this.element = h('section', { class: 'squad-tactics scroll-area' }, h('div', { class: 'section-heading' }, h('h2', null, 'THE STARTING VI'), h('small', null, 'Tap two shirts to swap.')),
+      this.editor.element, this.auto);
   }
   update(state: ClientState): void {
     if (!state.club) return;

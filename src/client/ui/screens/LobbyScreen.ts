@@ -4,13 +4,14 @@ import { LineupEditor } from '../components/LineupEditor';
 import { MentalityBar } from '../components/MentalityBar';
 import { h, render, setText } from '../dom';
 import type { Screen, ScreenContext } from './Screen';
+import { ART, artImage } from '../football';
 
 /** Pre-match room: share the code, pick a formation and lineup, press Ready. */
 export class LobbyScreen implements Screen {
   readonly element: HTMLElement;
   private readonly code = h('div', { class: 'room-code' });
   private readonly managers = h('div', { class: 'managers' });
-  private readonly mode = h('p', { class: 'lobby__status' });
+  private readonly mode = h('p', { class: 'lobby-mode' });
   private readonly readyButton: HTMLButtonElement;
   private readonly status = h('p', { class: 'lobby__status' });
   private readonly editor: LineupEditor;
@@ -25,11 +26,12 @@ export class LobbyScreen implements Screen {
       h('header', { class: 'lobby__header' },
         h('button', { class: 'btn btn--ghost btn--small', onClick: () => ctx.actions.leaveRoom() }, '← Leave'),
         h('div', { class: 'lobby__room' }, h('small', null, 'ROOM'), this.code),
-        h('button', { class: 'btn btn--ghost btn--small', onClick: () => this.share() }, '🔗 Share'),
+        h('button', { class: 'btn btn--ghost btn--small', onClick: () => this.share() }, 'Invite a friend ↗'),
       ),
       this.mode, this.managers,
-      h('section', { class: 'panel' }, h('h2', { class: 'panel__title' }, 'Your starting six'), this.editor.element),
-      h('section', { class: 'panel' },
+      h('section', { class: 'panel lobby-lineup scroll-area' }, h('h2', { class: 'panel__title' }, 'Your starting six'), this.editor.element),
+      h('section', { class: 'panel lobby-tactics scroll-area' },
+        h('div', { class: 'lobby-art' }, artImage(ART.match), h('strong', null, 'MAKE\nYOUR MOVE.')),
         h('h2', { class: 'panel__title' }, 'Mentality'),
         h('p', { class: 'lineup__hint' }, 'Sit deep and tackle hard, or throw players forward. You can move the slider at any moment of the match.'),
         this.mentality.element,

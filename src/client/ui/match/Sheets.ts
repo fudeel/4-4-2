@@ -8,20 +8,22 @@ import { h, render, setText } from '../dom';
 import { energyColor, playerById, ratingClass, shortName } from '../format';
 import { commentaryLine } from './CommentaryTicker';
 
-/** A bottom sheet over the pitch. */
+/** A match dialog over the pitch. Closed sheets stay out of keyboard navigation. */
 class Sheet {
   readonly element: HTMLElement;
   protected readonly body = h('div', { class: 'sheet__body' });
   protected readonly heading = h('h2', { class: 'sheet__title' });
 
   constructor(className: string, closable: boolean) {
-    this.element = h('div', { class: `sheet ${className}`, role: 'dialog' },
+    this.heading.id = `${className}-title`;
+    this.element = h('div', { class: `sheet ${className}`, role: 'dialog', 'aria-labelledby': this.heading.id, 'aria-hidden': 'true' },
       h('div', { class: 'sheet__panel' },
         h('header', { class: 'sheet__header' }, this.heading,
           closable ? h('button', { class: 'icon-btn', 'aria-label': 'Close', onClick: () => this.close() }, '✕') : null),
         this.body,
       ),
     );
+    this.element.inert = true;
     if (closable) this.element.addEventListener('click', e => { if (e.target === this.element) this.close(); });
   }
 
@@ -30,10 +32,14 @@ class Sheet {
   }
 
   open(): void {
+    this.element.inert = false;
+    this.element.setAttribute('aria-hidden', 'false');
     this.element.classList.add('is-open');
   }
 
   close(): void {
+    this.element.inert = true;
+    this.element.setAttribute('aria-hidden', 'true');
     this.element.classList.remove('is-open');
   }
 }
@@ -79,7 +85,7 @@ export class HalfTimeSheet extends Sheet {
   private readonly editor: LineupEditor;
   private readonly mentality: MentalityBar;
   private readonly timer = h('span', { class: 'sheet__timer' });
-  private readonly summary = h('div');
+  private readonly summary = h('div', { class: 'halftime-summary' });
   private readonly status = h('p', { class: 'lobby__status' });
   private readonly readyButton: HTMLButtonElement;
   private ready = false;
@@ -93,10 +99,11 @@ export class HalfTimeSheet extends Sheet {
     this.heading.append('Half-time ', this.timer);
     render(this.body,
       this.summary,
-      h('h3', { class: 'sheet__subtitle' }, 'Mentality'),
-      this.mentality.element,
-      h('h3', { class: 'sheet__subtitle' }, 'Tactics & substitutions'),
-      this.editor.element,
+      h('section', { class: 'halftime-tactics' },
+        h('h3', { class: 'sheet__subtitle' }, 'Mentality'),
+        this.mentality.element,
+        h('h3', { class: 'sheet__subtitle' }, 'Tactics & substitutions'),
+        this.editor.element),
       h('footer', { class: 'sheet__footer' }, this.status, this.readyButton),
     );
   }

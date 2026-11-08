@@ -1,6 +1,7 @@
 import type { CardDefinition } from '../../../shared/model/cards';
 import { h } from '../dom';
 import { TIMING_LABEL } from '../format';
+import { ART, artImage } from '../football';
 
 export interface CardViewOptions {
   selected?: boolean;
@@ -25,6 +26,7 @@ export function cardView(card: CardDefinition, options: CardViewOptions = {}): H
     'aria-disabled': options.disabled ? 'true' : 'false',
     onClick: options.onClick,
   },
+    artImage(card.timing === 'attack' ? ART.match : card.timing === 'defense' ? ART.stadium : ART.night, 'card__art'),
     h('span', { class: 'card__timing' }, TIMING_LABEL[card.timing]),
     h('span', { class: 'card__icon' }, card.icon),
     h('strong', { class: 'card__name' }, card.name),

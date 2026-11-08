@@ -1,6 +1,6 @@
 # 4-4-2
 
-A mobile-first, turn-based, card-driven **6-a-side football manager**. TypeScript everywhere, Three.js for the match, a small authoritative Node server for multiplayer, and a local JSON database.
+A widescreen, turn-based, card-driven **6-a-side football game**. TypeScript everywhere, Three.js for the match, a small authoritative Node server for multiplayer, and a local JSON database.
 
 > Create a manager account, build a persistent club, develop your squad and bring friends together for an evening of football.
 
@@ -14,7 +14,7 @@ npm run dev
 - Open **http://localhost:5173**. The game server runs on port 3001 and Vite proxies `/ws` to it.
 - **First visit:** register with a username (1–16 letters, no numbers, spaces or symbols) and a password (8–128 characters). Then name your club and choose its abbreviation and colour. No email is required.
 - **Two-player test on one computer:** use two browser profiles, or a regular window and a private window, with separate accounts. Cookies identify the manager; a reload keeps your seat. Two tabs in the same profile share an account.
-- **On your phone:** use the *Network* URL that Vite prints (e.g. `http://192.168.1.x:5173`) while on the same Wi-Fi.
+- **On your phone:** use the *Network* URL that Vite prints (e.g. `http://192.168.1.x:5173`) while on the same Wi-Fi. Rotate to landscape; portrait shows a rotation prompt. Menus and matches use a centred **16:9 surface**, with letterboxing on other screen shapes. Rotation preserves the current screen and live match; match timers continue.
 - **Solo:** *Practice vs AI* puts a bot in the away seat.
 - **Friends night:** host a night, share its **five-letter code** or invitation link, and invite 2–8 managers. The host starts a round-robin evening with balanced, quick matches, live standings and club prizes. Exhibition rooms use **four-character codes**.
 
@@ -49,6 +49,8 @@ The five branches are cumulative and can be reviewed/merged in order. **Branch 5
 | `codex/03-exhibitions` | Owned clubs in code/AI exhibitions, quick/classic settings, saved results |
 | `codex/04-progression` | Facilities, income, fan growth, training, youth and atomic spending |
 | `codex/05-friends-night` | Complete game, multi-manager evenings, schedules, standings, trophies, squad management and polish |
+
+The follow-up `codex/06-widescreen-football-ui` branch restyles the complete game with illustrated mode cards, vivid football colours, a kit-based player collection, dedicated squad/club/development tabs, and a broadcast match HUD. The gameplay and economy rules stay authoritative on the server. Original artwork paths and generation prompts are documented in [docs/ui-art.md](docs/ui-art.md).
 
 ## How a match works
 
